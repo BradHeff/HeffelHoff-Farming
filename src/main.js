@@ -10,11 +10,12 @@ import { mountHUD, toast, bindBuildPanel, positionBuildPanel, RES_ICONS } from '
 import { FloaterManager, StickyLabel } from './floaters.js';
 import { UpgradeManager } from './upgrades.js';
 import { PlayerCoinTower } from './coins.js';
-import { CustomerQueue, HelperManager, AmbientNpcManager } from './npcs.js';
+import { CustomerQueue, HelperManager, AmbientNpcManager, Shopkeeper } from './npcs.js';
+import { DustPuffManager } from './dust.js';
 import { LockedPlot } from './locks.js';
 import { FlightManager } from './flight.js';
 import { Farm } from './farms.js';
-import { BuildingUpgradeManager, BuildingHireManager } from './levels.js';
+import { BuildingUpgradeManager, BuildingHireManager, ExpansionTile, FarmHireManager } from './levels.js';
 
 class Game {
   constructor() {
@@ -60,16 +61,21 @@ class Game {
     this.helpers = new HelperManager(this.scene, this.world, this.builds);
     this.ambient = new AmbientNpcManager(this.scene);
     this.coinTower = new PlayerCoinTower(this.player);
-    // Multiple farm plots so the player can grow different crops in parallel
     this.farms = CONFIG.farms.map((cfg) => new Farm(this.scene, cfg));
+    this.shopkeeper = new Shopkeeper(this.scene, this.builds.sites.market);
     this.customers = new CustomerQueue(
       this.scene, this.camera, this.builds.sites.market, this.flight,
-      this.builds, this.farms
+      this.builds, this.farms, this.shopkeeper
     );
+    this.dust = new DustPuffManager(this.scene);
     this.buildingUpgrades = new BuildingUpgradeManager(this.scene, this.camera, this.builds);
     this.buildingHires = new BuildingHireManager(
       this.scene, this.camera, this.builds,
       (key) => { this.helpers.hireBuildingWorker(key); toast('👷 Worker hired!'); }
+    );
+    this.farmHires = new FarmHireManager(
+      this.scene, this.camera, this.farms,
+      (farm) => { this.helpers.hireFarmWorker(farm); toast('👩‍🌾 Farmer hired!'); }
     );
 
     this.fenceLock = new LockedPlot(
@@ -84,7 +90,20 @@ class Game {
     // the player progress naturally: grow crop → factory shows up → build it.
     this.builds.sites.sauceFactory.setLocked(true);
     this.builds.sites.chipsFactory.setLocked(true);
+    this.builds.sites.eggFarm.setLocked(true);
     this.builds._updateActive();
+
+    // Expansion tile — shows up after all main factories hit Level 3. When
+    // activated, unlocks the locked biome strip and reveals the Egg Farm
+    // plot for construction.
+    this.expansionTile = new ExpansionTile(
+      this.scene, this.camera, CONFIG.expansion, this.builds, this.world,
+      () => {
+        toast('🗺️ Map expanded — Egg Farm unlocked!');
+        this.builds.sites.eggFarm.setLocked(false);
+        this.builds._updateActive();
+      }
+    );
 
     mountHUD();
     bindBuildPanel(this.builds);
@@ -219,6 +238,20 @@ class Game {
       );
       this.world.removeHarvestable(h);
     }
+  }
+
+  _updateDust(dt) {
+    this.dust.update(dt);
+    if (!this.player.isMoving) return;
+    this._dustTimer = (this._dustTimer || 0) + dt;
+    if (this._dustTimer < 0.25) return;
+    this._dustTimer = 0;
+    const p = this.player.group.position;
+    const yaw = this.player.bodyGroup.rotation.y;
+    // Drop the puff slightly behind the player's feet + small lateral jitter
+    const bx = p.x - Math.sin(yaw) * 0.25 + (Math.random() - 0.5) * 0.18;
+    const bz = p.z - Math.cos(yaw) * 0.25 + (Math.random() - 0.5) * 0.18;
+    this.dust.spawn(bx, bz);
   }
 
   _updateFactoryUnlocks() {
@@ -391,6 +424,14 @@ class Game {
     if (market.completed && !this.customers.active) this.customers.setActive(true);
     this.customers.update(dt); // queue reads market._soldThisTick internally
     if (market.coinPile) market.coinPile.update(dt, this.player, this.floaters, RES_ICONS);
+    // Flip the SELL tile to its "active" thick-blue highlight whenever the
+    // player steps into the drop zone — communicates drop-ready state.
+    if (market.sellDecal) {
+      const dp = market.dropoffPos || market.position;
+      const p = this.player.group.position;
+      const inside = Math.hypot(p.x - dp.x, p.z - dp.z) < market.radius;
+      market.sellDecal.setHighlighted(inside);
+    }
   }
 
   _updateBuildPanel() {
@@ -433,6 +474,8 @@ class Game {
     this.builds.update(dt, this.elapsed);
     this.helpers.update(dt);
     this.ambient.update(dt);
+    this.shopkeeper.update(dt);
+    this._updateDust(dt);
     this._updateFarm(dt);
     this._updateFactoryUnlocks();
     this._updatePickupables(dt);
@@ -441,6 +484,8 @@ class Game {
     this.upgrades.update(dt, this.player);
     this.buildingUpgrades.update(dt, this.player);
     this.buildingHires.update(dt, this.player);
+    this.farmHires.update(dt, this.player);
+    if (this.expansionTile) this.expansionTile.update(dt, this.player);
     if (this.fenceLock && !this.fenceLock.unlocked) this.fenceLock.update(dt, this.player);
     this._updateCamera();
     this._updateGpsArrow(dt);

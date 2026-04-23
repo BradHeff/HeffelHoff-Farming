@@ -12,44 +12,81 @@ export class CoinPile {
     this.scene = scene;
     this.origin = new THREE.Vector3(origin.x, 0, origin.z);
     this.pending = 0;
-    this.stacksCount = opts.stacksCount || 10;
-    this.perStack = opts.perStack || 12;
-    this.pickupRadius = opts.pickupRadius || 2.0;
+    // Flat tray layout: a rectangular grid of cells, each holding up to
+    // `perStack` coins. Default 8×6 = 48 cells × 2 coins = 96 visual total.
+    this.cols = opts.cols || 8;
+    this.rows = opts.rows || 6;
+    this.perStack = opts.perStack || 2;
+    this.pickupRadius = opts.pickupRadius || 2.2;
+    this.stacksCount = this.cols * this.rows;
     this.total = this.stacksCount * this.perStack;
 
     this.group = new THREE.Group();
     this.group.position.copy(this.origin);
     scene.add(this.group);
 
-    const pad = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.8, 1.8, 0.06, 24),
-      new THREE.MeshLambertMaterial({ color: 0x8a6b42 })
-    );
-    pad.position.y = 0.03;
-    this.group.add(pad);
+    const cellW = 0.36;
+    const cellD = 0.3;
+    const trayW = this.cols * cellW + 0.4;
+    const trayD = this.rows * cellD + 0.4;
 
-    // Pre-computed local positions per slot (stack * coin)
+    // Rectangular wooden tray
+    const trayBase = new THREE.Mesh(
+      new THREE.BoxGeometry(trayW, 0.08, trayD),
+      new THREE.MeshLambertMaterial({ color: 0xc78b4a })
+    );
+    trayBase.position.y = 0.04;
+    this.group.add(trayBase);
+    const rim = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
+    const rimH = 0.1;
+    const rimT = 0.08;
+    const addRim = (w, d, x, z) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, rimH, d), rim);
+      m.position.set(x, 0.08 + rimH / 2, z);
+      this.group.add(m);
+    };
+    addRim(trayW, rimT, 0, -trayD / 2 + rimT / 2);
+    addRim(trayW, rimT, 0,  trayD / 2 - rimT / 2);
+    addRim(rimT, trayD, -trayW / 2 + rimT / 2, 0);
+    addRim(rimT, trayD,  trayW / 2 - rimT / 2, 0);
+
+    // Pre-computed local positions per slot (cell * perStack)
     this.slots = new Array(this.total);
-    const cols = 5, rows = Math.ceil(this.stacksCount / cols);
-    const cellW = 0.55;
     for (let i = 0; i < this.stacksCount; i++) {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const x = (col - (cols - 1) / 2) * cellW;
-      const z = (row - (rows - 1) / 2) * cellW * 0.9;
+      const col = i % this.cols;
+      const row = Math.floor(i / this.cols);
+      const x = (col - (this.cols - 1) / 2) * cellW;
+      const z = (row - (this.rows - 1) / 2) * cellD;
       for (let k = 0; k < this.perStack; k++) {
-        this.slots[i * this.perStack + k] = { x, y: 0.06 + k * 0.08, z };
+        this.slots[i * this.perStack + k] = { x, y: 0.12 + k * 0.07, z };
       }
     }
 
-    const coinGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.08, 14);
+    const coinGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.06, 12);
     const coinMat = new THREE.MeshLambertMaterial({ color: 0xf7c648 });
     this.coinInst = new THREE.InstancedMesh(coinGeo, coinMat, this.total);
     this.coinInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    // Start all hidden
     for (let i = 0; i < this.total; i++) this.coinInst.setMatrixAt(i, _coinZero);
     this.coinInst.instanceMatrix.needsUpdate = true;
     this.group.add(this.coinInst);
+
+    // Destination arrow floating above the tray — tells the player "payment
+    // collects here". Two-piece (shaft + head), bob-animated.
+    const arrow = new THREE.Group();
+    const arrowMat = new THREE.MeshLambertMaterial({ color: 0x2e9bff });
+    const shaftGeo = new THREE.BoxGeometry(0.24, 0.55, 0.24);
+    const shaft = new THREE.Mesh(shaftGeo, arrowMat);
+    shaft.position.y = 0.95;
+    arrow.add(shaft);
+    const headGeo = new THREE.ConeGeometry(0.45, 0.55, 4);
+    headGeo.rotateX(Math.PI);
+    headGeo.rotateY(Math.PI / 4);
+    const head = new THREE.Mesh(headGeo, arrowMat);
+    head.position.y = 0.4;
+    arrow.add(head);
+    arrow.position.y = 1.9;
+    this.group.add(arrow);
+    this._arrow = arrow;
 
     this._t = 0;
   }
@@ -85,6 +122,12 @@ export class CoinPile {
   update(dt, player, floaters, RES_ICONS) {
     this._t += dt;
     this.group.position.y = Math.sin(this._t * 2.2) * 0.04;
+    if (this._arrow) {
+      this._arrow.position.y = 1.9 + Math.sin(this._t * 3.4) * 0.18;
+      this._arrow.rotation.y = this._t * 1.2;
+      // Hide arrow when there are no coins to collect
+      this._arrow.visible = this.pending > 0;
+    }
     if (this.pending <= 0) return;
     const dx = player.group.position.x - this.origin.x;
     const dz = player.group.position.z - this.origin.z;

@@ -45,26 +45,51 @@ export class Farm {
   }
 
   _buildDecal() {
-    const width = this.cols * this.cfg.spacing + 1.2;
-    const depth = this.rows * this.cfg.spacing + 1.0;
-    this.decal = new ZoneDecal({
-      width, depth,
-      label: 'FARM', icon: '',
-      color: '#a0ffb0', textColor: 'rgba(240,255,220,0.95)',
-      textSize: 110,
-    });
-    this.decal.setPosition(this.center.x, this.center.z);
-    this.decal.addTo(this.scene);
+    // Show as plowed soil rows — no HARVEST label, no dashed outline.
+    const width = this.cols * this.cfg.spacing + 0.8;
+    const depth = this.rows * this.cfg.spacing + 0.6;
     this.bounds = { width, depth };
 
+    // Base soil rectangle
     const soil = new THREE.Mesh(
-      new THREE.PlaneGeometry(width - 0.6, depth - 0.6),
-      new THREE.MeshLambertMaterial({ color: 0x5a3e22, transparent: true, opacity: 0.6 })
+      new THREE.PlaneGeometry(width, depth),
+      new THREE.MeshLambertMaterial({
+        color: 0x5a3a20,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+      })
     );
     soil.rotation.x = -Math.PI / 2;
-    soil.position.set(this.center.x, 0.03, this.center.z);
+    soil.position.set(this.center.x, 0.02, this.center.z);
     this.scene.add(soil);
     this.soilMesh = soil;
+
+    // Darker plow furrows — thin strips across the X axis
+    const furrowMat = new THREE.MeshLambertMaterial({
+      color: 0x3a2612,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    });
+    this.furrowGroup = new THREE.Group();
+    const furrowCount = this.rows * 2;
+    const furrowGeo = new THREE.PlaneGeometry(width * 0.95, 0.1);
+    furrowGeo.rotateX(-Math.PI / 2);
+    for (let i = 0; i < furrowCount; i++) {
+      const f = new THREE.Mesh(furrowGeo, furrowMat);
+      const t = (i + 0.5) / furrowCount;
+      f.position.set(this.center.x, 0.03, this.center.z - depth / 2 + t * depth);
+      this.furrowGroup.add(f);
+    }
+    this.scene.add(this.furrowGroup);
+
+    // Wooden rail frame around the plot (simple 4-side border)
+    const railMat = new THREE.MeshLambertMaterial({ color: 0x7a5232 });
+    const hRail = new THREE.Mesh(new THREE.BoxGeometry(width + 0.2, 0.12, 0.12), railMat);
+    const vRail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, depth + 0.2), railMat);
+    const hN = hRail.clone(); hN.position.set(this.center.x, 0.08, this.center.z - depth / 2);
+    const hS = hRail.clone(); hS.position.set(this.center.x, 0.08, this.center.z + depth / 2);
+    const vW = vRail.clone(); vW.position.set(this.center.x - width / 2, 0.08, this.center.z);
+    const vE = vRail.clone(); vE.position.set(this.center.x + width / 2, 0.08, this.center.z);
+    this.scene.add(hN, hS, vW, vE);
+    this.frame = [hN, hS, vW, vE];
   }
 
   _buildCells() {
@@ -187,6 +212,6 @@ export class Farm {
     } else {
       this._reseedTimer = 0;
     }
-    if (this.decal) this.decal.update(dt);
+    // Plowed-soil farm no longer has an animated decal
   }
 }

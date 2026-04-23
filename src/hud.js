@@ -2,12 +2,14 @@ import { Inventory } from './state.js';
 
 export const RES_ICONS = {
   grass: '🌿', wood: '🪵', bale: '🌾', planks: '🪚',
-  tomato: '🍅', potato: '🥔', sauce: '🍶', chips: '🍟',
+  tomato: '🍅', potato: '🥔', sauce: '🍶', chips: '🍟', egg: '🥚',
   coin: '🪙', meat: '🥩',
 };
 
 export function mountHUD() {
-  const keys = ['wood', 'grass', 'bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'coin'];
+  // Only display the store's sellable stock + coins. Raw materials (grass /
+  // wood) are silent intermediates consumed by factories.
+  const keys = ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'coin'];
   const els = {};
   for (const k of keys) els[k] = document.querySelector(`[data-count="${k}"]`);
   const renderInventory = () => {

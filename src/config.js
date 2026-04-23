@@ -3,25 +3,28 @@
 export const CONFIG = {
   world: {
     size: 80,
-    // Biome zones (axis-aligned rectangles on XZ plane).
-    // Biomes fill the top half of the map so grass & trees read as dense
-    // carpets/forests. Paths are revealed naturally as the player harvests.
-    meadow: { minX: -38, maxX: -2, minZ: -38, maxZ: 0 },
-    forest: { minX: 2, maxX: 38, minZ: -38, maxZ: 0 },
-    grassCount: 1200,
-    treeCount: 200,
+    // Biome zones (axis-aligned rectangles on XZ plane). Smaller strips than
+    // before so the interactive area is compact and everything stays within a
+    // few steps of the player.
+    meadow: { minX: -28, maxX: -2, minZ: -22, maxZ: 0 },
+    forest: { minX: 2, maxX: 28, minZ: -22, maxZ: 0 },
+    grassCount: 900,
+    treeCount: 170,
     // Seconds before a harvested grass stalk regrows in place
     grassRegrowSec: 30,
+    // Trees take much longer to regrow than grass so forests feel persistent.
+    treeRegrowSec: 180,
     // Spawn close to the store — market is pre-built on spawn so the farmer
-    // always has a place to sell. Build plots are just north of spawn.
-    spawnPos: { x: 0, z: 14 },
+    // always has a place to sell. Build plots are tight around spawn.
+    spawnPos: { x: 0, z: 9 },
     buildPlots: {
-      market:      { x: 0, z: 22 },    // just south of spawn; pre-built
-      hayBaler:    { x: 0, z: 2 },     // center of build row
-      sawMill:     { x: -12, z: 2 },
-      fence:       { x: 12, z: 2 },
-      sauceFactory:{ x: -24, z: 8 },   // left side — unlocks after tomato chosen
-      chipsFactory:{ x:  24, z: 8 },   // right side — unlocks after potato chosen
+      market:      { x: 0, z: 13 },    // just south of spawn; pre-built
+      hayBaler:    { x: 0, z: 1 },     // center of build row
+      sawMill:     { x: -8, z: 1 },
+      fence:       { x: 8, z: 1 },
+      sauceFactory:{ x: -16, z: 4 },   // left flank — unlocks after tomato chosen
+      chipsFactory:{ x:  16, z: 4 },   // right flank — unlocks after potato chosen
+      eggFarm:     { x: 0, z: -28 },   // deep in expansion zone (locked)
     },
   },
   player: {
@@ -95,6 +98,14 @@ export const CONFIG = {
       reward: { coin: 15 },
       blurb: 'Packs potato chips',
     },
+    eggFarm: {
+      id: 'eggFarm',
+      name: 'Egg Farm',
+      icon: '🥚',
+      require: { wood: 30, planks: 15, grass: 25 },
+      reward: { coin: 40 },
+      blurb: 'Chickens lay eggs continuously',
+    },
   },
   // After completion, buildings become passive producers.
   producers: {
@@ -126,19 +137,26 @@ export const CONFIG = {
       intervalSec: 3.0,
       maxStack: 10,
     },
+    eggFarm: {
+      produces: 'egg',
+      consumeFrom: 'grass',        // chickens eat grass
+      consumePerCycle: 1,
+      intervalSec: 3.5,
+      maxStack: 10,
+    },
     // Market consumes stocked goods from Inventory and mints coins into the pile.
     market: {
       produces: 'coin',
       intervalSec: 1.8,
       // Coins per unit sold, by resource key
-      sellRewards: { bale: 8, planks: 12, tomato: 6, potato: 9, sauce: 18, chips: 22 },
+      sellRewards: { bale: 8, planks: 12, tomato: 6, potato: 9, sauce: 18, chips: 22, egg: 14 },
       maxStackVisual: 120,
       // Market sells in this priority order when multiple goods are stocked
-      sellPriority: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips'],
+      sellPriority: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg'],
     },
   },
   // Resources that live in the carry slot (in front of player). Others on back.
-  carryResources: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips'],
+  carryResources: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg'],
   // Crop definitions for the farm plot
   crops: {
     tomato: {
@@ -159,14 +177,14 @@ export const CONFIG = {
   // parallel. Both unlock once the Hay Baler is upgraded.
   farms: [
     {
-      center: { x: -22, z: -6 },
+      center: { x: -12, z: -4 },
       cols: 5, rows: 3, spacing: 1.35,
       unlockAtBalerLevel: 2,
       reseedDelayMs: 700,
       harvestYield: 1,
     },
     {
-      center: { x: 22, z: -10 },
+      center: { x: 12, z: -4 },
       cols: 5, rows: 3, spacing: 1.35,
       unlockAtBalerLevel: 2,
       reseedDelayMs: 700,
@@ -175,11 +193,24 @@ export const CONFIG = {
   ],
   // Legacy single-farm reference, kept for any imports that still use it.
   farm: {
-    center: { x: -22, z: -6 },
+    center: { x: -12, z: -4 },
     cols: 5, rows: 3, spacing: 1.35,
     unlockAtBalerLevel: 2,
     reseedDelayMs: 700,
     harvestYield: 1,
+  },
+  // World expansion — a deeper strip of grass + forest north of the main
+  // biomes that is initially un-harvestable. Unlocks when all main factories
+  // are Level 3 AND the player pays the coin cost.
+  expansion: {
+    meadowStrip: { minX: -28, maxX: -2, minZ: -34, maxZ: -22 },
+    forestStrip: { minX:  2, maxX: 28, minZ: -34, maxZ: -22 },
+    grassCount: 350,
+    treeCount: 80,
+    unlockCost: 500,
+    // Player walks onto this spot to activate the expansion once prereqs met
+    tilePos: { x: 0, z: -20 },
+    requiredAtL3: ['hayBaler', 'sawMill', 'sauceFactory', 'chipsFactory'],
   },
   // Building upgrades — item-cost deposits to raise a building's level.
   // Higher levels speed up production and increase output cap.
@@ -201,11 +232,16 @@ export const CONFIG = {
       { level: 2, require: { potato: 10, planks: 6 }, intervalMul: 0.7, stackMul: 1.0 },
       { level: 3, require: { potato: 20, planks: 12 }, intervalMul: 0.5, stackMul: 1.0 },
     ],
+    eggFarm: [
+      { level: 2, require: { egg: 10, planks: 6 }, intervalMul: 0.7, stackMul: 1.0 },
+      { level: 3, require: { egg: 20, planks: 12 }, intervalMul: 0.5, stackMul: 1.0 },
+    ],
   },
-  // Upgrade tile sits south-west of the building, hire tile south-east.
-  // These are in front of the building (south) so they don't overlap the
-  // building body or the output pad on the east side.
-  buildingUpgradeOffset: { x: -2.8, z: 3.6 },
+  // Upgrade tile sits south-west of the building (closer row), hire tile
+  // south-east and pushed farther south (different row) so between adjacent
+  // buildings a neighbour's HIRE and this one's UP are both separated in X
+  // AND Z — no more decal overlap.
+  buildingUpgradeOffset: { x: -2.6, z: 3.2 },
   // Which resources each completed building accepts at its DROP tile.
   // Market is special: it accepts crafted items delivered at the SELL tile.
   buildingInputs: {
@@ -213,15 +249,27 @@ export const CONFIG = {
     sawMill: ['wood'],
     sauceFactory: ['tomato'],
     chipsFactory: ['potato'],
-    market: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips'],
+    eggFarm: ['grass'],
+    market: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg'],
   },
   // Per-building hire tile config — unlocked at Level 2. Hiring spawns a
   // worker that picks up produced items and delivers them to the market.
   buildingWorker: {
-    offset: { x: 2.8, z: 3.6 },
+    offset: { x: 2.6, z: 5.2 },
     hireCost: 150,
     moveSpeed: 4.0,
     carryCap: 4,
+  },
+  // Farm worker — hired at the farm's HIRE tile. Walks into the plot,
+  // harvests ready crops, delivers to the matching factory (sauce for
+  // tomato, chips for potato) or falls back to market, then returns.
+  farmWorker: {
+    hireCost: 120,
+    moveSpeed: 4.0,
+    carryCap: 6,
+    harvestIntervalSec: 0.45,
+    // HIRE tile offset south of the farm plot (toward player / camera)
+    tileOffsetZ: 3.4,
   },
   // Upgrades purchased at in-world tiles. Each level multiplies next cost.
   upgradeSteps: {
@@ -232,15 +280,15 @@ export const CONFIG = {
   // Upgrade tile plot positions — row between spawn and build area.
   // Capacity upgrade removed since the backpack is uncapped.
   upgradePlots: [
-    { key: 'speed',       x: -4, z: 8 },
-    { key: 'slashRadius', x:  4, z: 8 },
+    { key: 'speed',       x: -3.5, z: 6 },
+    { key: 'slashRadius', x:  3.5, z: 6 },
   ],
   // Customer queue — on the SOUTH side of the store (behind, from the
   // player's viewpoint). Market sits at (0, 22), queue at z=25 so customers
   // queue between store and the camera. Player deposits from the north side
   // via the SELL tile.
   customers: {
-    queueStart: { x: -1.5, z: 25 },
+    queueStart: { x: -1.5, z: 16 },
     queueDir:   { x: 1, z: 0 },
     spacing: 1.0,
     maxQueue: 4,

@@ -29,10 +29,10 @@ export class BuildingLevelTile {
 
   _buildDecal() {
     this.decal = new ZoneDecal({
-      width: 2.2, depth: 2.0,
+      width: 1.7, depth: 1.5,
       label: 'UP', icon: '',
       color: '#ffb347', textColor: 'rgba(255,230,180,0.95)',
-      textSize: 150,
+      textSize: 140,
     });
     this.decal.setPosition(this.position.x, this.position.z);
     this.decal.addTo(this.scene);
@@ -62,7 +62,7 @@ export class BuildingLevelTile {
   setActive(v) {
     this.active = v;
     this.decal.mesh.visible = v && !!this._nextTier();
-    this.card.style.display = (v && !!this._nextTier()) ? 'block' : 'none';
+    // DOM card visibility is further gated by player proximity in update()
   }
 
   update(dt, player) {
@@ -78,7 +78,8 @@ export class BuildingLevelTile {
 
     const dx = player.group.position.x - this.position.x;
     const dz = player.group.position.z - this.position.z;
-    const inside = Math.hypot(dx, dz) < this.radius;
+    const dist = Math.hypot(dx, dz);
+    const inside = dist < this.radius;
 
     if (inside) {
       this._drainAcc = (this._drainAcc || 0) + dt;
@@ -106,7 +107,11 @@ export class BuildingLevelTile {
       this._drainAcc = 0;
     }
 
-    this._refreshCard(tier);
+    // Only show the floating card when the player is close — avoids
+    // multiple adjacent building upgrade cards visually stacking.
+    const near = dist < 5.5;
+    this.card.style.display = near ? 'block' : 'none';
+    if (near) this._refreshCard(tier);
   }
 
   _commit(tier) {
@@ -184,10 +189,10 @@ export class BuildingHireTile {
 
   _buildDecal() {
     this.decal = new ZoneDecal({
-      width: 2.0, depth: 1.8,
+      width: 1.7, depth: 1.5,
       label: 'HIRE', icon: '',
       color: '#d1b7ff', textColor: 'rgba(250,240,255,0.95)',
-      textSize: 130,
+      textSize: 120,
     });
     this.decal.setPosition(this.position.x, this.position.z);
     this.decal.addTo(this.scene);
@@ -207,7 +212,7 @@ export class BuildingHireTile {
     this.active = v;
     const show = v && !this.hired;
     this.decal.mesh.visible = show;
-    this.card.style.display = show ? 'block' : 'none';
+    // DOM card visibility is further gated by player proximity in update()
   }
 
   onHired() {
@@ -222,15 +227,21 @@ export class BuildingHireTile {
 
     const dx = player.group.position.x - this.position.x;
     const dz = player.group.position.z - this.position.z;
-    const inside = Math.hypot(dx, dz) < this.radius;
+    const dist = Math.hypot(dx, dz);
+    const inside = dist < this.radius;
     if (inside && Inventory.coin >= this.cost) {
       Inventory.coin -= this.cost;
       Inventory.emit();
       onHireFn(this.buildingKey);
       this.onHired();
+      return;
     }
 
-    // Refresh card (cache innerHTML to avoid per-frame DOM rebuilds)
+    // Only show the floating card when the player is close enough to care —
+    // prevents multiple adjacent building cards from stacking into a blob.
+    const near = dist < 5.5;
+    this.card.style.display = near ? 'block' : 'none';
+    if (!near) return;
     const name = { hayBaler: 'Baler', sawMill: 'Saw', market: 'Market' }[this.buildingKey] || '';
     const sig = `${name}|${this.cost}`;
     if (sig !== this._lastCardSig) {
@@ -246,6 +257,100 @@ export class BuildingHireTile {
     const sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
     this.card.style.transform = `translate(calc(-50% + ${sx}px), calc(-100% + ${sy}px))`;
     this.card.style.opacity = (v.z > 0 && v.z < 1) ? '1' : '0';
+  }
+}
+
+// Expansion tile — the "unlock the rest of the map" gate. Appears only when
+// every required factory is Level 3; then the player pays a coin cost to
+// activate and the locked biome area becomes harvestable + new build plots
+// open up.
+export class ExpansionTile {
+  constructor(scene, camera, cfg, buildManager, world, onActivate) {
+    this.scene = scene;
+    this.camera = camera;
+    this.cfg = cfg;
+    this.buildManager = buildManager;
+    this.world = world;
+    this.onActivate = onActivate;
+    this.activated = false;
+    this.position = new THREE.Vector3(cfg.tilePos.x, 0, cfg.tilePos.z);
+    this.radius = 2.2;
+    this._projVec = new THREE.Vector3();
+    this._buildDecal();
+    this._buildCard();
+  }
+
+  _buildDecal() {
+    this.decal = new ZoneDecal({
+      width: 3.2, depth: 2.4,
+      label: 'EXPAND', icon: '',
+      color: '#ffcc66', textColor: 'rgba(255,236,180,0.95)',
+      textSize: 110,
+    });
+    this.decal.setPosition(this.position.x, this.position.z);
+    this.decal.addTo(this.scene);
+    this.decal.mesh.visible = false;
+  }
+
+  _buildCard() {
+    const el = document.createElement('div');
+    el.className = 'level-card';
+    el.style.display = 'none';
+    document.getElementById('world-overlay').appendChild(el);
+    this.card = el;
+  }
+
+  _prereqMet() {
+    return this.cfg.requiredAtL3.every((k) => {
+      const s = this.buildManager.sites[k];
+      return s && s.level >= 3;
+    });
+  }
+
+  update(dt, player) {
+    if (this.activated) return;
+    const met = this._prereqMet();
+    this.decal.mesh.visible = met;
+    this.card.style.display = met ? 'block' : 'none';
+    if (!met) return;
+    this.decal.update(dt);
+
+    const dx = player.group.position.x - this.position.x;
+    const dz = player.group.position.z - this.position.z;
+    const inside = Math.hypot(dx, dz) < this.radius;
+    if (inside && Inventory.coin >= this.cfg.unlockCost) {
+      Inventory.coin -= this.cfg.unlockCost;
+      Inventory.emit();
+      this._activate();
+      return;
+    }
+
+    // Refresh card (cheap — sig only changes when cost/state changes)
+    const sig = `${Inventory.coin >= this.cfg.unlockCost}`;
+    if (sig !== this._lastCardSig) {
+      this._lastCardSig = sig;
+      const canPay = Inventory.coin >= this.cfg.unlockCost;
+      this.card.innerHTML = `
+        <div class="title">🗺️ Expand Map</div>
+        <div class="lvl-row ${canPay ? '' : 'req'}">
+          <span class="${canPay ? 'done' : 'missing'}">🪙 ${this.cfg.unlockCost}</span>
+        </div>
+      `;
+    }
+    this._projVec.set(this.position.x, 2.0, this.position.z);
+    const v = this._projVec.project(this.camera);
+    const sx = (v.x * 0.5 + 0.5) * window.innerWidth;
+    const sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
+    this.card.style.transform = `translate(calc(-50% + ${sx}px), calc(-100% + ${sy}px))`;
+    this.card.style.opacity = (v.z > 0 && v.z < 1) ? '1' : '0';
+  }
+
+  _activate() {
+    this.activated = true;
+    this.decal.removeFrom(this.scene);
+    this.card.remove();
+    this.world.unlockExpansion();
+    if (this.onActivate) this.onActivate();
   }
 }
 
@@ -266,6 +371,116 @@ export class BuildingHireManager {
       const shouldShow = site.completed && !site._locked && site.level >= 2 && !tile.hired;
       if (tile.active !== shouldShow) tile.setActive(shouldShow);
       tile.update(dt, player, this.onHireFn);
+    }
+  }
+}
+
+// Farm hire tile — sits south of each farm plot. Unlocked when the farm is
+// unlocked; spending the hire cost spawns a FarmWorker that auto-harvests
+// ready crops and delivers them to the matching factory (sauce for tomato,
+// chips for potato) or the market as a fallback.
+export class FarmHireTile {
+  constructor(scene, camera, farm) {
+    this.scene = scene;
+    this.camera = camera;
+    this.farm = farm;
+    const cfg = CONFIG.farmWorker;
+    this.cost = cfg.hireCost;
+    this.radius = 1.6;
+    this.hired = false;
+    this.active = false;
+    // Position south of farm (toward camera) so the player walks into it.
+    const halfDepth = (farm.bounds?.depth || farm.rows * farm.cfg.spacing) / 2;
+    this.position = new THREE.Vector3(
+      farm.center.x, 0, farm.center.z + halfDepth + cfg.tileOffsetZ
+    );
+    this._buildDecal();
+    this._buildCard();
+  }
+
+  _buildDecal() {
+    this.decal = new ZoneDecal({
+      width: 2.0, depth: 1.8,
+      label: 'HIRE', icon: '👩‍🌾',
+      color: '#b7ff94', textColor: 'rgba(240,255,230,0.98)',
+      textSize: 110,
+    });
+    this.decal.setPosition(this.position.x, this.position.z);
+    this.decal.addTo(this.scene);
+    this.decal.mesh.visible = false;
+  }
+
+  _buildCard() {
+    const el = document.createElement('div');
+    el.className = 'level-card';
+    el.style.display = 'none';
+    document.getElementById('world-overlay').appendChild(el);
+    this.card = el;
+    this._projVec = new THREE.Vector3();
+  }
+
+  setActive(v) {
+    this.active = v;
+    const show = v && !this.hired;
+    this.decal.mesh.visible = show;
+    // DOM card visibility further gated by player proximity in update()
+  }
+
+  onHired() {
+    this.hired = true;
+    this.decal.mesh.visible = false;
+    this.card.style.display = 'none';
+  }
+
+  update(dt, player, onHireFn) {
+    if (!this.active || this.hired) return;
+    this.decal.update(dt);
+
+    const dx = player.group.position.x - this.position.x;
+    const dz = player.group.position.z - this.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < this.radius && Inventory.coin >= this.cost) {
+      Inventory.coin -= this.cost;
+      Inventory.emit();
+      onHireFn(this.farm);
+      this.onHired();
+      return;
+    }
+
+    const near = dist < 5.5;
+    this.card.style.display = near ? 'block' : 'none';
+    if (!near) return;
+
+    const sig = `${this.cost}|${Inventory.coin >= this.cost}`;
+    if (sig !== this._lastCardSig) {
+      this._lastCardSig = sig;
+      const canPay = Inventory.coin >= this.cost;
+      this.card.innerHTML = `
+        <div class="title">👩‍🌾 Hire Farmer</div>
+        <div class="lvl-row">
+          <span class="${canPay ? 'done' : 'missing'}">🪙 ${this.cost}</span>
+        </div>
+      `;
+    }
+    this._projVec.set(this.position.x, 2.0, this.position.z);
+    const v = this._projVec.project(this.camera);
+    const sx = (v.x * 0.5 + 0.5) * window.innerWidth;
+    const sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
+    this.card.style.transform = `translate(calc(-50% + ${sx}px), calc(-100% + ${sy}px))`;
+    this.card.style.opacity = (v.z > 0 && v.z < 1) ? '1' : '0';
+  }
+}
+
+export class FarmHireManager {
+  constructor(scene, camera, farms, onHireFn) {
+    this.onHireFn = onHireFn;
+    this.tiles = farms.map((f) => new FarmHireTile(scene, camera, f));
+  }
+  update(dt, player) {
+    for (const t of this.tiles) {
+      const shouldShow = t.farm.unlocked && !t.hired;
+      if (t.active !== shouldShow) t.setActive(shouldShow);
+      t.update(dt, player, this.onHireFn);
     }
   }
 }

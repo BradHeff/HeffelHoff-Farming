@@ -197,22 +197,41 @@ export class BuildSite {
     this._rebuildFinishedMesh();
   }
 
-  // Builds a small conveyor belt between x=xStart and x=xEnd (local) to sit
-  // between the factory and the brown stacking pad.
+  // Builds an animated conveyor belt between xStart and xEnd (local). Rollers
+  // spin continuously; belt scrolls via a UV-independent color-stripe trick
+  // (child stripe meshes that slide along the belt).
   _buildConveyor(parent, xStart, xEnd) {
     const length = Math.abs(xEnd - xStart);
     const midX = (xStart + xEnd) / 2;
     const beltMat = new THREE.MeshLambertMaterial({ color: 0x2a2a2a });
-    const rollerMat = new THREE.MeshLambertMaterial({ color: 0x5a5a5a });
+    const stripeMat = new THREE.MeshLambertMaterial({ color: 0x4a4a4a });
+    const rollerMat = new THREE.MeshLambertMaterial({ color: 0x7a7a7a });
     const frameMat = new THREE.MeshLambertMaterial({ color: 0x7a5a42 });
-    // Belt surface
+
     const belt = new THREE.Mesh(
       new THREE.BoxGeometry(length, 0.08, 0.7),
       beltMat
     );
     belt.position.set(midX, 0.35, 0);
     parent.add(belt);
-    // Side frames
+
+    // Scrolling stripe segments on top of the belt — gives the illusion of
+    // motion. They loop along the belt length in _tickProducer.
+    const stripeGroup = new THREE.Group();
+    stripeGroup.position.set(xStart, 0.39, 0);
+    const stripeGeo = new THREE.BoxGeometry(0.12, 0.02, 0.62);
+    const stripes = [];
+    const stripeCount = Math.max(3, Math.floor(length / 0.4));
+    for (let i = 0; i < stripeCount; i++) {
+      const s = new THREE.Mesh(stripeGeo, stripeMat);
+      s.position.x = (i / stripeCount) * length;
+      stripeGroup.add(s);
+      stripes.push(s);
+    }
+    parent.add(stripeGroup);
+    this._conveyorStripes = this._conveyorStripes || [];
+    this._conveyorStripes.push({ stripes, length, baseX: xStart });
+
     for (const z of [-0.38, 0.38]) {
       const frame = new THREE.Mesh(
         new THREE.BoxGeometry(length + 0.1, 0.15, 0.06),
@@ -221,7 +240,6 @@ export class BuildSite {
       frame.position.set(midX, 0.35, z);
       parent.add(frame);
     }
-    // Legs
     for (const x of [xStart, xEnd]) {
       const leg = new THREE.Mesh(
         new THREE.BoxGeometry(0.1, 0.35, 0.5),
@@ -230,7 +248,8 @@ export class BuildSite {
       leg.position.set(x, 0.175, 0);
       parent.add(leg);
     }
-    // Rollers at each end
+    // Rollers spin on each frame
+    this._conveyorRollers = this._conveyorRollers || [];
     for (const x of [xStart, xEnd]) {
       const roller = new THREE.Mesh(
         new THREE.CylinderGeometry(0.12, 0.12, 0.7, 12),
@@ -239,6 +258,34 @@ export class BuildSite {
       roller.rotation.x = Math.PI / 2;
       roller.position.set(x, 0.35, 0);
       parent.add(roller);
+      this._conveyorRollers.push(roller);
+    }
+  }
+
+  // Build a chimney that periodically puffs out smoke spheres. `pos` is local
+  // to the finished building group.
+  _buildSmokeStack(parent, pos, color = 0x7a3a2a) {
+    const chim = new THREE.Mesh(
+      new THREE.BoxGeometry(0.4, 1.4, 0.4),
+      new THREE.MeshLambertMaterial({ color })
+    );
+    chim.position.set(pos.x, pos.y, pos.z);
+    parent.add(chim);
+
+    const puffsParent = new THREE.Group();
+    puffsParent.position.set(pos.x, pos.y + 0.9, pos.z);
+    parent.add(puffsParent);
+    this._smokePuffs = this._smokePuffs || [];
+    const puffGeo = new THREE.SphereGeometry(0.22, 10, 8);
+    for (let i = 0; i < 4; i++) {
+      // Clone material per puff so opacity tweens are independent
+      const mat = new THREE.MeshLambertMaterial({
+        color: 0xe6e6ea, transparent: true, opacity: 0.8,
+      });
+      const puff = new THREE.Mesh(puffGeo, mat);
+      puff.visible = false;
+      puffsParent.add(puff);
+      this._smokePuffs.push({ mesh: puff, t: 0, ttl: 2.2, delay: i * 0.55 });
     }
   }
 
@@ -350,20 +397,8 @@ export class BuildSite {
       this._buildConveyor(g, 1.7, 4.2);
       g.add(pad);
       if (lvl >= 2) {
-        // Brick chimney
-        const chim = new THREE.Mesh(
-          new THREE.BoxGeometry(0.5, 1.2, 0.5),
-          new THREE.MeshLambertMaterial({ color: 0x7a3a2a })
-        );
-        chim.position.set(-0.9, 2.9 * s + 0.6, 0);
-        g.add(chim);
-        // Puff at top
-        const puff = new THREE.Mesh(
-          new THREE.SphereGeometry(0.35, 10, 8),
-          new THREE.MeshLambertMaterial({ color: 0xe0e0e8 })
-        );
-        puff.position.set(-0.9, 2.9 * s + 1.4, 0);
-        g.add(puff);
+        // Animated brick chimney with smoke puffs
+        this._buildSmokeStack(g, { x: -0.9, y: 2.9 * s, z: 0 }, 0x7a3a2a);
       }
       if (lvl >= 3) {
         // Silo on the side
@@ -456,18 +491,7 @@ export class BuildSite {
       g.add(pad);
       this._sawBlade = blade;
       if (lvl >= 2) {
-        // Steam pipe on the roof
-        const pipe = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.18, 0.18, 1.2, 10),
-          new THREE.MeshLambertMaterial({ color: 0x5a5a5a })
-        );
-        pipe.position.set(-0.7, 3.0, 0);
-        const puff = new THREE.Mesh(
-          new THREE.SphereGeometry(0.3, 10, 8),
-          new THREE.MeshLambertMaterial({ color: 0xe0e0e8 })
-        );
-        puff.position.set(-0.7, 3.7, 0);
-        g.add(pipe, puff);
+        this._buildSmokeStack(g, { x: -0.7, y: 3.0, z: 0 }, 0x5a5a5a);
       }
       if (lvl >= 3) {
         // Log pile stacked beside the mill
@@ -499,16 +523,9 @@ export class BuildSite {
       g.add(body, roofL, roofR, pad);
       this._buildConveyor(g, 1.5, 4.0);
       if (lvl >= 2) {
-        // Steam stack
-        const stack = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.22, 0.22, 1.2, 10),
-          new THREE.MeshLambertMaterial({ color: 0x5a5a5a })
-        );
-        stack.position.set(-0.8, 3.0, 0);
-        g.add(stack);
+        this._buildSmokeStack(g, { x: -0.8, y: 3.0, z: 0 }, 0x5a5a5a);
       }
       if (lvl >= 3) {
-        // Big bottle prop on the roof
         const bottle = new THREE.Mesh(
           new THREE.CylinderGeometry(0.25, 0.3, 0.8, 12),
           new THREE.MeshLambertMaterial({ color: 0xd02e2a })
@@ -535,12 +552,7 @@ export class BuildSite {
       g.add(body, roofL, roofR, pad);
       this._buildConveyor(g, 1.5, 4.0);
       if (lvl >= 2) {
-        const stack = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.22, 0.22, 1.2, 10),
-          new THREE.MeshLambertMaterial({ color: 0x5a5a5a })
-        );
-        stack.position.set(-0.8, 3.0, 0);
-        g.add(stack);
+        this._buildSmokeStack(g, { x: -0.8, y: 3.0, z: 0 }, 0x5a5a5a);
       }
       if (lvl >= 3) {
         // Big chip bag on the roof
@@ -550,6 +562,65 @@ export class BuildSite {
         );
         bag.position.set(0.5, 3.2, 0);
         g.add(bag);
+      }
+    } else if (this.key === 'eggFarm') {
+      const s = lvl === 1 ? 1.0 : (lvl === 2 ? 1.12 : 1.25);
+      // Wooden coop with red roof, little chicken-coop look
+      const coop = new THREE.Mesh(
+        new THREE.BoxGeometry(2.8 * s, 1.6 * s, 2.4 * s),
+        new THREE.MeshLambertMaterial({ color: 0xe0cf8e })
+      );
+      coop.position.y = 0.8 * s;
+      const roofMat = new THREE.MeshLambertMaterial({ color: 0xb4402a });
+      const roofL = new THREE.Mesh(new THREE.BoxGeometry(3.2 * s, 0.12, 1.7 * s), roofMat);
+      roofL.rotation.z = 0.45; roofL.position.set(-0.6 * s, 1.9 * s, 0);
+      const roofR = roofL.clone(); roofR.rotation.z = -0.45; roofR.position.set(0.6 * s, 1.9 * s, 0);
+      // Perch / little fence in front
+      const fencePost = new THREE.CylinderGeometry(0.06, 0.06, 0.5, 8);
+      const fenceMat = new THREE.MeshLambertMaterial({ color: 0x7a5232 });
+      for (const x of [-1.2, -0.4, 0.4, 1.2]) {
+        const p = new THREE.Mesh(fencePost, fenceMat);
+        p.position.set(x * s, 0.25, 1.3 * s);
+        g.add(p);
+      }
+      const pad = new THREE.Mesh(
+        new THREE.BoxGeometry(2.6, 0.08, 1.6),
+        new THREE.MeshLambertMaterial({ color: 0x8a6b42 })
+      );
+      pad.position.set(2.7 + (lvl - 1) * 0.3, 0.04, 0);
+      g.add(coop, roofL, roofR, pad);
+      this._buildConveyor(g, 1.5, 4.0);
+      // Chicken perched on the ridge
+      const chick = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 10, 8),
+        new THREE.MeshLambertMaterial({ color: 0xffffff })
+      );
+      chick.position.set(0.6, 2.2 * s, 0.2);
+      chick.scale.set(1, 1.1, 1.1);
+      const beak = new THREE.Mesh(
+        new THREE.ConeGeometry(0.05, 0.12, 6),
+        new THREE.MeshLambertMaterial({ color: 0xffc040 })
+      );
+      beak.rotation.x = Math.PI / 2;
+      beak.position.set(0.6, 2.2 * s, 0.38);
+      g.add(chick, beak);
+      if (lvl >= 2) {
+        // Big egg prop
+        const ed = new THREE.SphereGeometry(0.3, 12, 10);
+        ed.scale(1, 1.25, 1);
+        const bigEgg = new THREE.Mesh(ed, new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }));
+        bigEgg.position.set(-0.8, 2.3 * s, 0);
+        g.add(bigEgg);
+      }
+      if (lvl >= 3) {
+        // Second chicken
+        const chick2 = new THREE.Mesh(
+          new THREE.SphereGeometry(0.18, 10, 8),
+          new THREE.MeshLambertMaterial({ color: 0xd44020 })
+        );
+        chick2.position.set(-1.2, 2.2 * s, -0.2);
+        chick2.scale.set(1, 1.1, 1.1);
+        g.add(chick2);
       }
     } else if (this.key === 'fence') {
       const postMat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
@@ -579,6 +650,7 @@ export class BuildSite {
       label: 'SELL', icon: '',
       color: '#8fd1ff', textColor: 'rgba(255,255,255,0.95)',
       textSize: 120,
+      highlightColor: '#2e9bff',
     });
     sellDecal.setPosition(this.position.x, this.position.z - 3.8);
     sellDecal.addTo(this.scene);
@@ -586,8 +658,8 @@ export class BuildSite {
 
     this.coinPile = new CoinPile(
       this.scene,
-      { x: this.position.x - 4.0, z: this.position.z + 0.5 },
-      { stacksCount: 10, perStack: 12, pickupRadius: 2.0 }
+      { x: this.position.x - 3.2, z: this.position.z + 0.8 },
+      { cols: 8, rows: 6, perStack: 2, pickupRadius: 2.2 }
     );
 
     // Persistent table stock: pools of meshes for each sellable resource
@@ -600,6 +672,7 @@ export class BuildSite {
       potato: new THREE.MeshLambertMaterial({ color: 0xc49a5a }),
       sauce:  new THREE.MeshLambertMaterial({ color: 0xd02e2a }),
       chips:  new THREE.MeshLambertMaterial({ color: 0xe6b548 }),
+      egg:    new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }),
     };
     this._stockGeos = {
       bale:   new THREE.CylinderGeometry(0.22, 0.22, 0.36, 12),
@@ -608,19 +681,22 @@ export class BuildSite {
       potato: new THREE.SphereGeometry(0.18, 8, 6),
       sauce:  new THREE.CylinderGeometry(0.11, 0.13, 0.3, 10),
       chips:  new THREE.BoxGeometry(0.28, 0.22, 0.2),
+      egg:    new THREE.SphereGeometry(0.16, 10, 8),
     };
     this._stockGeos.bale.rotateZ(Math.PI / 2);
+    this._stockGeos.egg.scale(1, 1.25, 1);
 
     // Column positions across the table front (matches the counter mesh)
     const tableY = 1.05;
     const tableZ = this.position.z - 1.7;
     this._stockColumns = {
-      bale:   { x: this.position.x - 1.35, y: tableY, z: tableZ, maxStack: 4 },
-      planks: { x: this.position.x - 0.8,  y: tableY, z: tableZ, maxStack: 4 },
-      tomato: { x: this.position.x - 0.25, y: tableY, z: tableZ, maxStack: 4 },
-      potato: { x: this.position.x + 0.3,  y: tableY, z: tableZ, maxStack: 4 },
-      sauce:  { x: this.position.x + 0.85, y: tableY, z: tableZ, maxStack: 4 },
-      chips:  { x: this.position.x + 1.4,  y: tableY, z: tableZ, maxStack: 4 },
+      bale:   { x: this.position.x - 1.45, y: tableY, z: tableZ, maxStack: 4 },
+      planks: { x: this.position.x - 0.95, y: tableY, z: tableZ, maxStack: 4 },
+      tomato: { x: this.position.x - 0.45, y: tableY, z: tableZ, maxStack: 4 },
+      potato: { x: this.position.x + 0.05, y: tableY, z: tableZ, maxStack: 4 },
+      sauce:  { x: this.position.x + 0.55, y: tableY, z: tableZ, maxStack: 4 },
+      chips:  { x: this.position.x + 1.05, y: tableY, z: tableZ, maxStack: 4 },
+      egg:    { x: this.position.x + 1.55, y: tableY, z: tableZ, maxStack: 4 },
     };
     // Wooden crate wrapper per column so stacks look like crated goods
     const crateMat = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
@@ -645,7 +721,7 @@ export class BuildSite {
       crateGroup.add(rim);
       this.scene.add(crateGroup);
     }
-    this._stockMeshes = { bale: [], planks: [], tomato: [], potato: [], sauce: [], chips: [] };
+    this._stockMeshes = { bale: [], planks: [], tomato: [], potato: [], sauce: [], chips: [], egg: [] };
     this._refreshTableStock();
   }
 
@@ -698,7 +774,8 @@ export class BuildSite {
     if (!pc) return;
 
     if (this.key === 'hayBaler' || this.key === 'sawMill' ||
-        this.key === 'sauceFactory' || this.key === 'chipsFactory') {
+        this.key === 'sauceFactory' || this.key === 'chipsFactory' ||
+        this.key === 'eggFarm') {
       this.producedItems = this.producedItems.filter((it) => !it.collected);
       if (this.producedItems.length < pc.maxStack) {
         this.produceTimer += dt;
@@ -761,6 +838,14 @@ export class BuildSite {
           mat: new THREE.MeshLambertMaterial({ color: 0xe6b548 }),
           rotZ: 0,
         };
+      } else if (pc.produces === 'egg') {
+        const g = new THREE.SphereGeometry(0.2, 12, 10);
+        g.scale(1, 1.25, 1);
+        PRODUCE_PROTOS.egg = {
+          geo: g,
+          mat: new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }),
+          rotZ: 0,
+        };
       }
     }
     const proto = PRODUCE_PROTOS[pc.produces];
@@ -793,6 +878,36 @@ export class BuildSite {
       this.arrowGroup.rotation.y += dt * 0.6;
     }
     if (this._sawBlade) this._sawBlade.rotation.z += 4 * dt;
+    // Animate conveyor rollers + scrolling stripes
+    if (this._conveyorRollers) {
+      for (const r of this._conveyorRollers) r.rotation.y += 6 * dt;
+    }
+    if (this._conveyorStripes) {
+      for (const cs of this._conveyorStripes) {
+        for (const s of cs.stripes) {
+          s.position.x = (s.position.x + dt * 0.6) % cs.length;
+        }
+      }
+    }
+    // Smoke puffs — each has its own delay and TTL; float up + grow + fade.
+    if (this._smokePuffs) {
+      for (const p of this._smokePuffs) {
+        p.t += dt;
+        const local = (p.t - p.delay) % (p.ttl + p.delay * (this._smokePuffs.length - 1));
+        if (local < 0) { p.mesh.visible = false; continue; }
+        const life = local / p.ttl;
+        if (life >= 1) { p.mesh.visible = false; continue; }
+        p.mesh.visible = true;
+        p.mesh.position.set(
+          Math.sin(local * 2) * 0.15,
+          life * 1.2,
+          Math.cos(local * 1.7) * 0.12
+        );
+        const s = 0.5 + life * 0.9;
+        p.mesh.scale.setScalar(s);
+        p.mesh.material.opacity = 0.8 * (1 - life);
+      }
+    }
     if (this.completed) this._tickProducer(dt, elapsed);
   }
 
@@ -822,6 +937,7 @@ export class BuildManager {
       fence:        new BuildSite(scene, 'fence',        CONFIG.world.buildPlots.fence,        this.pickupables),
       sauceFactory: new BuildSite(scene, 'sauceFactory', CONFIG.world.buildPlots.sauceFactory, this.pickupables),
       chipsFactory: new BuildSite(scene, 'chipsFactory', CONFIG.world.buildPlots.chipsFactory, this.pickupables),
+      eggFarm:      new BuildSite(scene, 'eggFarm',      CONFIG.world.buildPlots.eggFarm,      this.pickupables),
     };
     this.hasEnemies = false;
     this._subs = new Set();
@@ -837,8 +953,8 @@ export class BuildManager {
   }
 
   _priorityOrder() {
-    if (this.hasEnemies) return ['fence', 'sawMill', 'hayBaler', 'sauceFactory', 'chipsFactory', 'market'];
-    return ['hayBaler', 'sawMill', 'sauceFactory', 'chipsFactory', 'market', 'fence'];
+    if (this.hasEnemies) return ['fence', 'sawMill', 'hayBaler', 'sauceFactory', 'chipsFactory', 'eggFarm', 'market'];
+    return ['hayBaler', 'sawMill', 'sauceFactory', 'chipsFactory', 'eggFarm', 'market', 'fence'];
   }
 
   _updateActive() {

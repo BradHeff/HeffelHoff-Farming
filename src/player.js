@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { Backpack, PlayerCarry, PlayerStats } from './state.js';
+import { getFaceMaterial } from './faces.js';
 
 // Player character — smoother rounded geometry (capsules + spheres) instead
 // of blocky boxes. Owns:
@@ -75,18 +76,11 @@ export class Player {
     belt.position.y = 0.85;
     body.add(belt);
 
-    // Head — sphere
-    const headGeo = new THREE.SphereGeometry(0.28, 18, 14);
-    this.head = new THREE.Mesh(headGeo, skinMat);
+    // Head — sphere with painted face texture (eyes/mouth/blush/eyebrows)
+    const headGeo = new THREE.SphereGeometry(0.28, 20, 16);
+    this.head = new THREE.Mesh(headGeo, getFaceMaterial('default'));
     this.head.position.y = 1.75;
     body.add(this.head);
-
-    // Eyes (two tiny dark spheres)
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x1a1a1a });
-    const eyeGeo = new THREE.SphereGeometry(0.04, 8, 6);
-    const eyeL = new THREE.Mesh(eyeGeo, eyeMat); eyeL.position.set(-0.1, 1.78, 0.25);
-    const eyeR = new THREE.Mesh(eyeGeo, eyeMat); eyeR.position.set(0.1, 1.78, 0.25);
-    body.add(eyeL, eyeR);
 
     // Straw hat — wider brim, rounded top
     const brim = new THREE.Mesh(
@@ -265,8 +259,10 @@ export class Player {
       potato: { geo: new THREE.SphereGeometry(0.16, 8, 6), mat: new THREE.MeshLambertMaterial({ color: 0xc49a5a }), layerH: 0.16 },
       sauce:  { geo: new THREE.CylinderGeometry(0.11, 0.13, 0.32, 10), mat: new THREE.MeshLambertMaterial({ color: 0xd02e2a }), layerH: 0.32 },
       chips:  { geo: new THREE.BoxGeometry(0.28, 0.22, 0.18), mat: new THREE.MeshLambertMaterial({ color: 0xe6b548 }), layerH: 0.22 },
+      egg:    { geo: new THREE.SphereGeometry(0.14, 10, 8),  mat: new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }), layerH: 0.2 },
     };
     this.carryKinds.bale.geo.rotateZ(Math.PI / 2);
+    this.carryKinds.egg.geo.scale(1, 1.25, 1);
     this.carryMeshes = [];
 
     PlayerCarry.subscribe(() => this._updateCarry());
@@ -276,7 +272,7 @@ export class Player {
   _updateCarry() {
     const items = PlayerCarry.items;
     const seq = [];
-    for (const k of ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips']) {
+    for (const k of ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg']) {
       for (let i = 0; i < (items[k] || 0); i++) seq.push(k);
     }
     while (this.carryMeshes.length < seq.length) {

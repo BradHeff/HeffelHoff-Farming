@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { Inventory } from './state.js';
-// Import shared icon map so customer bubbles show the real emoji for tomato /
-// potato instead of falling back to "?".
 import { RES_ICONS } from './hud.js';
+import { getFaceMaterial } from './faces.js';
 
 // Shared chibi geometry pool — created ONCE at module load. Every spawned
 // NPC reuses these buffers. Materials per-color are cached below.
@@ -44,6 +43,66 @@ function chibiHairMat(color) {
 
 const HAIR_COLORS = [0x3a2412, 0x8a5232, 0xd4a552, 0x5a3820, 0x2a2018, 0xa86a42];
 
+// Shared geometry + material for items NPCs carry. Created once; every
+// worker/helper reuses these buffers (no GPU leak across hundreds of trips).
+const NPC_CARRY_PROTOS = {
+  grass:  { geo: new THREE.IcosahedronGeometry(0.16, 0),            mat: new THREE.MeshLambertMaterial({ color: 0x5bbf3d }), rotZ: 0 },
+  wood:   { geo: new THREE.BoxGeometry(0.22, 0.16, 0.16),            mat: new THREE.MeshLambertMaterial({ color: 0x8b5a2b }), rotZ: 0 },
+  bale:   { geo: new THREE.CylinderGeometry(0.17, 0.17, 0.28, 10),   mat: new THREE.MeshLambertMaterial({ color: 0xe2c35a }), rotZ: Math.PI / 2 },
+  planks: { geo: new THREE.BoxGeometry(0.42, 0.07, 0.16),            mat: new THREE.MeshLambertMaterial({ color: 0xb77842 }), rotZ: 0 },
+  tomato: { geo: new THREE.SphereGeometry(0.14, 10, 8),              mat: new THREE.MeshLambertMaterial({ color: 0xe04a3c }), rotZ: 0 },
+  potato: { geo: new THREE.SphereGeometry(0.13, 8, 6),               mat: new THREE.MeshLambertMaterial({ color: 0xc49a5a }), rotZ: 0 },
+  sauce:  { geo: new THREE.CylinderGeometry(0.09, 0.11, 0.24, 10),   mat: new THREE.MeshLambertMaterial({ color: 0xd02e2a }), rotZ: 0 },
+  chips:  { geo: new THREE.BoxGeometry(0.22, 0.18, 0.14),            mat: new THREE.MeshLambertMaterial({ color: 0xe6b548 }), rotZ: 0 },
+  egg:    { geo: new THREE.SphereGeometry(0.12, 10, 8),              mat: new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }), rotZ: 0 },
+};
+NPC_CARRY_PROTOS.egg.geo.scale(1, 1.25, 1);
+
+// Renders an NPC's carried load as a small stack in front of their torso.
+// Items = { bale: 3 }, { grass: 5 }, etc. Mesh pool grows as needed and is
+// reused across trips so there are no allocations while walking.
+function setNpcCarry(group, items) {
+  const sig = Object.entries(items || {}).map(([k, v]) => `${k}:${v}`).join(',');
+  if (group.userData.carrySig === sig) return;
+  group.userData.carrySig = sig;
+
+  if (!group.userData.carryGroup) {
+    const cg = new THREE.Group();
+    cg.position.set(0, 0.9, 0.3); // front of torso
+    group.add(cg);
+    group.userData.carryGroup = cg;
+    group.userData.carryMeshes = [];
+  }
+  const cg = group.userData.carryGroup;
+  const meshes = group.userData.carryMeshes;
+
+  // Build stack sequence, cap at 6 visible for readability
+  const seq = [];
+  for (const [k, n] of Object.entries(items || {})) {
+    for (let i = 0; i < n && seq.length < 6; i++) seq.push(k);
+  }
+
+  while (meshes.length < seq.length) {
+    const m = new THREE.Mesh(NPC_CARRY_PROTOS.grass.geo, NPC_CARRY_PROTOS.grass.mat);
+    m.visible = false;
+    cg.add(m);
+    meshes.push(m);
+  }
+
+  let y = 0;
+  for (let i = 0; i < meshes.length; i++) {
+    const m = meshes[i];
+    if (i >= seq.length) { m.visible = false; continue; }
+    const proto = NPC_CARRY_PROTOS[seq[i]] || NPC_CARRY_PROTOS.grass;
+    m.visible = true;
+    m.geometry = proto.geo;
+    m.material = proto.mat;
+    m.position.set(((i * 41) % 9 - 4) * 0.01, y, 0);
+    m.rotation.z = proto.rotZ;
+    y += 0.18;
+  }
+}
+
 // Shared walk-cycle helpers so every NPC animates the same way.
 function animateWalk(group, phase) {
   const legs = group.userData.legs;
@@ -64,10 +123,9 @@ function damperWalk(group) {
   if (arms) { arms[0].rotation.x *= 0.8; arms[1].rotation.x *= 0.8; }
 }
 
-// Rounded chibi NPC with shared capsule/sphere primitives. Now includes
-// arms+hands (animated on walk), a mouth, and visible hair under the hat so
-// each NPC reads as an actual character rather than a hatstand.
-function makeChibi(color, hatColor = 0xc69645, hairColor = null) {
+// Rounded chibi NPC. Head uses a CanvasTexture-painted face (eyes, mouth,
+// blush, eyebrows) — much more expressive than stacked primitive eyes.
+function makeChibi(color, hatColor = 0xc69645, hairColor = null, faceVariant = 'default') {
   const g = new THREE.Group();
   const shirt = chibiShirtMat(color);
   const hat = chibiHatMat(hatColor);
@@ -83,13 +141,11 @@ function makeChibi(color, hatColor = 0xc69645, hairColor = null) {
   torso.position.y = 0.85;
   g.add(torso);
 
-  // Arms on each side of torso; animated on walk
   const armL = new THREE.Mesh(CHIBI_GEOS.arm, shirt);
   armL.position.set(-0.32, 0.95, 0);
   const armR = new THREE.Mesh(CHIBI_GEOS.arm, shirt);
   armR.position.set(0.32, 0.95, 0);
   g.add(armL, armR);
-  // Hands parented to arms so they swing together
   const handL = new THREE.Mesh(CHIBI_GEOS.hand, CHIBI_SKIN_MAT);
   handL.position.set(0, -0.25, 0);
   armL.add(handL);
@@ -97,26 +153,17 @@ function makeChibi(color, hatColor = 0xc69645, hairColor = null) {
   handR.position.set(0, -0.25, 0);
   armR.add(handR);
 
-  // Hair: sphere under the hat, flattened and sticking out at the back/sides
+  // Hair sticks out from under the hat at the back + sides
   const hairMesh = new THREE.Mesh(CHIBI_GEOS.hair, hair);
   hairMesh.position.y = 1.5;
   hairMesh.scale.set(1.02, 0.65, 1.02);
   g.add(hairMesh);
 
-  const head = new THREE.Mesh(CHIBI_GEOS.head, CHIBI_SKIN_MAT);
+  // Head with painted face texture
+  const head = new THREE.Mesh(CHIBI_GEOS.head, getFaceMaterial(faceVariant));
   head.position.y = 1.45;
   g.add(head);
 
-  // Eyes + mouth for facial expression
-  const eL = new THREE.Mesh(CHIBI_GEOS.eye, CHIBI_EYE_MAT); eL.position.set(-0.10, 1.48, 0.23);
-  const eR = new THREE.Mesh(CHIBI_GEOS.eye, CHIBI_EYE_MAT); eR.position.set( 0.10, 1.48, 0.23);
-  g.add(eL, eR);
-  const mouth = new THREE.Mesh(CHIBI_GEOS.mouth, CHIBI_MOUTH_MAT);
-  mouth.position.set(0, 1.35, 0.24);
-  mouth.scale.set(1.3, 0.45, 0.6);
-  g.add(mouth);
-
-  // Hat with a rounded top so it reads as a real hat, not a disc
   const hatMesh = new THREE.Mesh(CHIBI_GEOS.hat, hat);
   hatMesh.position.y = 1.7;
   g.add(hatMesh);
@@ -127,7 +174,53 @@ function makeChibi(color, hatColor = 0xc69645, hairColor = null) {
   g.userData.legs = [legL, legR];
   g.userData.arms = [armL, armR];
   g.userData.torso = torso;
+  g.userData.head = head;
   return g;
+}
+
+// Stationary shopkeeper standing behind the market counter. Idles with a
+// subtle torso bob and waves one arm when a sale happens — sells the stall
+// as "alive" instead of an empty booth.
+export class Shopkeeper {
+  constructor(scene, marketSite) {
+    this.scene = scene;
+    this.marketSite = marketSite;
+    this.group = makeChibi(0xc4a053, 0xffffff, null, 'happy');
+    // Inside the stall, behind the counter, facing customers (+Z).
+    this.group.position.set(
+      marketSite.position.x,
+      0,
+      marketSite.position.z - 0.5
+    );
+    this.group.rotation.y = 0;
+    scene.add(this.group);
+    this._t = Math.random() * Math.PI;
+    this._waveTimer = 0;
+  }
+
+  wave() {
+    // Triggered by CustomerQueue on each successful sale.
+    this._waveTimer = 1.0;
+  }
+
+  update(dt) {
+    this._t += dt;
+    if (this.group.userData.torso) {
+      this.group.userData.torso.position.y = 0.85 + Math.sin(this._t * 2) * 0.025;
+    }
+    const arms = this.group.userData.arms;
+    if (!arms) return;
+    if (this._waveTimer > 0) {
+      this._waveTimer = Math.max(0, this._waveTimer - dt * 1.6);
+      const t = 1 - this._waveTimer; // 0 → 1 progression
+      const env = Math.sin(t * Math.PI);
+      arms[1].rotation.x = -Math.PI * 0.7 * env;
+      arms[1].rotation.z = 0.35 * env + Math.sin(this._t * 10) * 0.25 * env;
+    } else {
+      arms[1].rotation.x *= 0.85;
+      arms[1].rotation.z *= 0.85;
+    }
+  }
 }
 
 // Customer queue at the market. Each customer has a state machine:
@@ -139,7 +232,7 @@ function makeChibi(color, hatColor = 0xc69645, hairColor = null) {
 // whenever the head is waiting and we want to buy. Market consumes from
 // Inventory and replies with market._soldThisTick (key of sold resource).
 export class CustomerQueue {
-  constructor(scene, camera, marketSite, flightManager, buildManager, farms) {
+  constructor(scene, camera, marketSite, flightManager, buildManager, farms, shopkeeper) {
     this.scene = scene;
     this.camera = camera;
     this.marketSite = marketSite;
@@ -148,6 +241,7 @@ export class CustomerQueue {
     // for items the player can actually produce.
     this.buildManager = buildManager;
     this.farms = farms;
+    this.shopkeeper = shopkeeper;
     this.active = false;
     this.customers = [];
     this.spawnTimer = 0;
@@ -169,6 +263,7 @@ export class CustomerQueue {
     }
     if (sites.sauceFactory?.completed) opts.push('sauce');
     if (sites.chipsFactory?.completed) opts.push('chips');
+    if (sites.eggFarm?.completed) opts.push('egg');
     return opts;
   }
 
@@ -284,6 +379,11 @@ export class CustomerQueue {
         }
       } else {
         damperWalk(c.group);
+        // While waiting in line, lift the right arm slightly — reads as
+        // "I'd like to buy" instead of standing still like a hatstand.
+        if (c.state === 'wait' && c.group.userData.arms) {
+          c.group.userData.arms[1].rotation.x = -0.8;
+        }
       }
 
       // Independent serving logic: each waiting customer tries to buy their
@@ -354,12 +454,16 @@ export class CustomerQueue {
         durationMs: 520, arcH: 1.4,
       });
     }
-    // Walk off; next customer takes this slot
+    // Walk off; next customer takes this slot. Render the purchased items
+    // in their arms so it reads as "bought it, carrying it home".
     c.state = 'leave';
     c.targetX = c.group.position.x + 6;
     c.targetZ = c.group.position.z + 5;
-    // Hide bubble immediately
     if (c.bubble) c.bubble.style.opacity = '0';
+    c.carryItems = { [c.wantKey]: Math.min(c.wantQty, 6) };
+    setNpcCarry(c.group, c.carryItems);
+    // Wave to the departing customer
+    if (this.shopkeeper) this.shopkeeper.wave();
     this._reassignSlots();
   }
 }
@@ -373,7 +477,9 @@ const CUSTOMER_FLIGHT_PROTOS = {
   potato: { geo: new THREE.SphereGeometry(0.16, 8, 6),           mat: new THREE.MeshLambertMaterial({ color: 0xc49a5a }) },
   sauce:  { geo: new THREE.CylinderGeometry(0.1, 0.13, 0.3, 10), mat: new THREE.MeshLambertMaterial({ color: 0xd02e2a }) },
   chips:  { geo: new THREE.BoxGeometry(0.25, 0.2, 0.2),          mat: new THREE.MeshLambertMaterial({ color: 0xe6b548 }) },
+  egg:    { geo: new THREE.SphereGeometry(0.14, 10, 8),          mat: new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }) },
 };
+CUSTOMER_FLIGHT_PROTOS.egg.geo.scale(1, 1.25, 1);
 
 // Helper NPC — hireable farmer that walks meadow → deposit loop endlessly.
 export class Helper {
@@ -421,6 +527,7 @@ export class Helper {
       this.walkPhase += dt * 10;
       animateWalk(this.group, this.walkPhase);
       this.group.rotation.y = Math.atan2(dx / dist, dz / dist);
+      setNpcCarry(this.group, { grass: this.carried });
       return;
     }
     if (this.state === 'toMeadow') {
@@ -456,6 +563,7 @@ export class Helper {
       this.state = 'toMeadow';
       this._pickTarget();
     }
+    setNpcCarry(this.group, { grass: this.carried });
   }
 }
 
@@ -617,10 +725,10 @@ export class BuildingWorker {
       this.walkPhase += dt * 10;
       animateWalk(this.group, this.walkPhase);
       this.group.rotation.y = Math.atan2(dx / dist, dz / dist);
+      setNpcCarry(this.group, this.carrying);
       return;
     }
     if (this.state === 'toFactory') {
-      // Take up to `cap` produced items from the pad
       const items = this.site.producedItems || [];
       let taken = 0;
       for (let i = items.length - 1; i >= 0 && taken < this.cap; i--) {
@@ -635,11 +743,9 @@ export class BuildingWorker {
         this.state = 'toMarket';
         this._pickTarget();
       } else {
-        // Nothing to carry — idle briefly and retry
         this._pickTarget();
       }
     } else if (this.state === 'toMarket') {
-      // Deposit into Inventory (market shelf picks it up visually)
       for (const [k, v] of Object.entries(this.carrying)) {
         if (v > 0) Inventory.add(k, v);
       }
@@ -647,6 +753,128 @@ export class BuildingWorker {
       this.state = 'toFactory';
       this._pickTarget();
     }
+    setNpcCarry(this.group, this.carrying);
+  }
+}
+
+// FarmWorker — hired at a farm's HIRE tile. Walks into the plot, picks the
+// nearest ready crop, carries it out to the matching factory (sauce for
+// tomato, chips for potato) or the market if the factory isn't built, then
+// returns. The Farm itself auto-reseeds empty cells, so the worker only has
+// to harvest + deliver.
+export class FarmWorker {
+  constructor(scene, farm, buildManager, world) {
+    this.scene = scene;
+    this.farm = farm;
+    this.buildManager = buildManager;
+    this.world = world;
+    this.group = makeChibi(0x6aa33a, 0xffd240, null, 'content');
+    this.group.position.set(farm.center.x, 0, farm.center.z + 1.5);
+    scene.add(this.group);
+    this.carrying = {};
+    this.cap = CONFIG.farmWorker.carryCap;
+    this.state = 'toField';
+    this.walkPhase = 0;
+    this.harvestTimer = 0;
+    this._pickTarget();
+  }
+
+  _pickTarget() {
+    if (this.state === 'toField') {
+      // Head toward a random spot inside the plot
+      const bounds = this.farm.bounds || { width: 4, depth: 4 };
+      this.target = {
+        x: this.farm.center.x + (Math.random() - 0.5) * (bounds.width * 0.6),
+        z: this.farm.center.z + (Math.random() - 0.5) * (bounds.depth * 0.6),
+      };
+    } else if (this.state === 'toFactory') {
+      const dst = this._deliveryTarget();
+      const p = dst.dropoffPos || dst.position;
+      this.target = {
+        x: p.x + (Math.random() - 0.5) * 1.2,
+        z: p.z + (Math.random() - 0.5) * 0.6,
+      };
+    }
+  }
+
+  _deliveryTarget() {
+    // Pick the factory that consumes whatever we're carrying. If the factory
+    // isn't built yet, fall back to the market (so sales still happen).
+    const sites = this.buildManager.sites;
+    if ((this.carrying.tomato || 0) > 0 && sites.sauceFactory?.completed) return sites.sauceFactory;
+    if ((this.carrying.potato || 0) > 0 && sites.chipsFactory?.completed) return sites.chipsFactory;
+    return sites.market;
+  }
+
+  _carriedTotal() {
+    let total = 0;
+    for (const v of Object.values(this.carrying)) total += v;
+    return total;
+  }
+
+  update(dt) {
+    if (!this.farm.unlocked) return;
+    const speed = CONFIG.farmWorker.moveSpeed;
+    const dx = this.target.x - this.group.position.x;
+    const dz = this.target.z - this.group.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > 0.2) {
+      const step = Math.min(dist, speed * dt);
+      this.group.position.x += (dx / dist) * step;
+      this.group.position.z += (dz / dist) * step;
+      this.walkPhase += dt * 10;
+      animateWalk(this.group, this.walkPhase);
+      this.group.rotation.y = Math.atan2(dx / dist, dz / dist);
+      setNpcCarry(this.group, this.carrying);
+      return;
+    }
+    damperWalk(this.group);
+
+    if (this.state === 'toField') {
+      this.harvestTimer += dt;
+      if (this.harvestTimer < CONFIG.farmWorker.harvestIntervalSec) {
+        setNpcCarry(this.group, this.carrying);
+        return;
+      }
+      this.harvestTimer = 0;
+      // Find the closest ready cell in the farm
+      let best = null; let bestD = Infinity;
+      for (const cell of this.farm.cells) {
+        if (cell.state !== 'ready' || !cell.harvestable || cell.harvestable.removed) continue;
+        const ddx = cell.x - this.group.position.x;
+        const ddz = cell.z - this.group.position.z;
+        const d = ddx * ddx + ddz * ddz;
+        if (d < bestD) { bestD = d; best = cell; }
+      }
+      if (best) {
+        const h = best.harvestable;
+        const key = h.yield.key;
+        this.carrying[key] = (this.carrying[key] || 0) + h.yield.amount;
+        this.world.removeHarvestable(h);
+        if (this._carriedTotal() >= this.cap) {
+          this.state = 'toFactory';
+          this._pickTarget();
+        } else {
+          // Walk to the next nearest spot in the field
+          this._pickTarget();
+        }
+      } else if (this._carriedTotal() > 0) {
+        // Nothing ready right now — take what we have to the factory
+        this.state = 'toFactory';
+        this._pickTarget();
+      } else {
+        // Idle wander inside the plot
+        this._pickTarget();
+      }
+    } else if (this.state === 'toFactory') {
+      for (const [k, v] of Object.entries(this.carrying)) {
+        if (v > 0) Inventory.add(k, v);
+      }
+      this.carrying = {};
+      this.state = 'toField';
+      this._pickTarget();
+    }
+    setNpcCarry(this.group, this.carrying);
   }
 }
 
@@ -657,6 +885,7 @@ export class HelperManager {
     this.buildManager = buildManager;
     this.helpers = [];
     this.buildingWorkers = [];
+    this.farmWorkers = [];
   }
 
   hireBuildingWorker(buildingKey) {
@@ -664,6 +893,9 @@ export class HelperManager {
     const market = this.buildManager.sites.market;
     if (!site || !market) return;
     this.buildingWorkers.push(new BuildingWorker(this.scene, buildingKey, site, market));
+  }
+  hireFarmWorker(farm) {
+    this.farmWorkers.push(new FarmWorker(this.scene, farm, this.buildManager, this.world));
   }
   hireCost() {
     const cfg = CONFIG.helpers;
@@ -682,5 +914,6 @@ export class HelperManager {
   update(dt) {
     for (const h of this.helpers) h.update(dt);
     for (const w of this.buildingWorkers) w.update(dt);
+    for (const w of this.farmWorkers) w.update(dt);
   }
 }

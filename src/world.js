@@ -173,6 +173,8 @@ export class World {
           yield: { key: 'grass', amount: 1 },
           radius: 0.38,
           position: new THREE.Vector3(x, 0, z),
+          // Cached matrix used to restore the instance after regrowth.
+          originalMatrix: _m.clone(),
         });
         i++;
       }
@@ -344,8 +346,21 @@ export class World {
     this.scene.add(mesh);
   }
 
-  update(_dt, _elapsed) {
-    // Ambient tick placeholder
+  update(_dt, elapsed) {
+    this._elapsed = elapsed;
+    // Process grass regrowth queue. Entries are pushed in order with a
+    // monotonic respawnAt, so we only need to peek the front.
+    const q = this._regrowQueue;
+    if (q && q.length > 0 && this.grassInstanceMesh) {
+      while (q.length > 0 && q[0].respawnAt <= elapsed) {
+        const h = q.shift();
+        this.grassInstanceMesh.setMatrixAt(h.instanceId, h.originalMatrix);
+        this.grassInstanceMesh.instanceMatrix.needsUpdate = true;
+        h.removed = false;
+        h.hp = 1;
+        h.respawnAt = null;
+      }
+    }
   }
 
   queryInSlashArc(originVec3, forwardVec3, reach, arcDeg) {
@@ -371,6 +386,9 @@ export class World {
     if (h.kind === 'grassInstance') {
       this.grassInstanceMesh.setMatrixAt(h.instanceId, _zero);
       this.grassInstanceMesh.instanceMatrix.needsUpdate = true;
+      // Schedule regrowth — after the delay we restore the original matrix.
+      h.respawnAt = (this._elapsed || 0) + CONFIG.world.grassRegrowSec;
+      (this._regrowQueue ||= []).push(h);
     } else if (h.kind === 'treeInstance') {
       for (const inst of this.treeInstMeshes) {
         inst.setMatrixAt(h.instanceId, _zero);

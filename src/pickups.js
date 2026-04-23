@@ -16,6 +16,8 @@ export class PickupManager {
       planks: new THREE.MeshLambertMaterial({ color: 0xb77842 }),
       tomato: new THREE.MeshLambertMaterial({ color: 0xe04a3c }),
       potato: new THREE.MeshLambertMaterial({ color: 0xc49a5a }),
+      sauce: new THREE.MeshLambertMaterial({ color: 0xd02e2a }),
+      chips: new THREE.MeshLambertMaterial({ color: 0xe6b548 }),
     };
     this.geos = {
       grass: new THREE.IcosahedronGeometry(0.22, 0),
@@ -24,6 +26,9 @@ export class PickupManager {
       planks: new THREE.BoxGeometry(0.42, 0.08, 0.18),
       tomato: new THREE.SphereGeometry(0.18, 10, 8),
       potato: new THREE.SphereGeometry(0.16, 8, 6),
+      // Sauce = small bottle (cylinder), chips = small bag (box)
+      sauce: new THREE.CylinderGeometry(0.11, 0.13, 0.32, 10),
+      chips: new THREE.BoxGeometry(0.28, 0.18, 0.22),
     };
   }
 

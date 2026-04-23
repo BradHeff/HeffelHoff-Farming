@@ -263,6 +263,8 @@ export class Player {
       planks: { geo: new THREE.BoxGeometry(0.52, 0.08, 0.18), mat: new THREE.MeshLambertMaterial({ color: 0xb77842 }), layerH: 0.12 },
       tomato: { geo: new THREE.SphereGeometry(0.18, 10, 8), mat: new THREE.MeshLambertMaterial({ color: 0xe04a3c }), layerH: 0.18 },
       potato: { geo: new THREE.SphereGeometry(0.16, 8, 6), mat: new THREE.MeshLambertMaterial({ color: 0xc49a5a }), layerH: 0.16 },
+      sauce:  { geo: new THREE.CylinderGeometry(0.11, 0.13, 0.32, 10), mat: new THREE.MeshLambertMaterial({ color: 0xd02e2a }), layerH: 0.32 },
+      chips:  { geo: new THREE.BoxGeometry(0.28, 0.22, 0.18), mat: new THREE.MeshLambertMaterial({ color: 0xe6b548 }), layerH: 0.22 },
     };
     this.carryKinds.bale.geo.rotateZ(Math.PI / 2);
     this.carryMeshes = [];
@@ -274,7 +276,7 @@ export class Player {
   _updateCarry() {
     const items = PlayerCarry.items;
     const seq = [];
-    for (const k of ['bale', 'planks', 'tomato', 'potato']) {
+    for (const k of ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips']) {
       for (let i = 0; i < (items[k] || 0); i++) seq.push(k);
     }
     while (this.carryMeshes.length < seq.length) {

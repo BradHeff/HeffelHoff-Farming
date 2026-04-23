@@ -2,11 +2,12 @@ import { Inventory } from './state.js';
 
 export const RES_ICONS = {
   grass: '🌿', wood: '🪵', bale: '🌾', planks: '🪚',
-  tomato: '🍅', potato: '🥔', coin: '🪙', meat: '🥩',
+  tomato: '🍅', potato: '🥔', sauce: '🍶', chips: '🍟',
+  coin: '🪙', meat: '🥩',
 };
 
 export function mountHUD() {
-  const keys = ['wood', 'grass', 'bale', 'planks', 'tomato', 'potato', 'coin'];
+  const keys = ['wood', 'grass', 'bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'coin'];
   const els = {};
   for (const k of keys) els[k] = document.querySelector(`[data-count="${k}"]`);
   const renderInventory = () => {

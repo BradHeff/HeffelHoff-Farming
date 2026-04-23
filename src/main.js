@@ -57,11 +57,15 @@ class Game {
     this.flight = new FlightManager(this.scene);
     this.fullLabel = new StickyLabel(this.camera, ''); // unused (uncapped pack)
     this.upgrades = new UpgradeManager(this.scene, this.camera);
-    this.customers = new CustomerQueue(this.scene, this.camera, this.builds.sites.market, this.flight);
     this.helpers = new HelperManager(this.scene, this.world, this.builds);
     this.ambient = new AmbientNpcManager(this.scene);
     this.coinTower = new PlayerCoinTower(this.player);
-    this.farm = new Farm(this.scene);
+    // Multiple farm plots so the player can grow different crops in parallel
+    this.farms = CONFIG.farms.map((cfg) => new Farm(this.scene, cfg));
+    this.customers = new CustomerQueue(
+      this.scene, this.camera, this.builds.sites.market, this.flight,
+      this.builds, this.farms
+    );
     this.buildingUpgrades = new BuildingUpgradeManager(this.scene, this.camera, this.builds);
     this.buildingHires = new BuildingHireManager(
       this.scene, this.camera, this.builds,
@@ -74,6 +78,13 @@ class Game {
       () => { toast('🔓 Fence plot unlocked'); this.builds.setHasEnemies(true); },
       this.builds, 'fence'
     );
+
+    // Sauce + Chips factories start locked. They reveal (become active build
+    // plots) the moment the matching crop is chosen on any farm. This lets
+    // the player progress naturally: grow crop → factory shows up → build it.
+    this.builds.sites.sauceFactory.setLocked(true);
+    this.builds.sites.chipsFactory.setLocked(true);
+    this.builds._updateActive();
 
     mountHUD();
     bindBuildPanel(this.builds);
@@ -104,8 +115,9 @@ class Game {
     const buttons = modal.querySelectorAll('.seed-btn');
     buttons.forEach((b) => {
       b.addEventListener('click', () => {
+        if (!this._pendingFarm) return;
         const crop = b.dataset.crop;
-        this.farm.seed(crop, this.world.harvestables);
+        this._pendingFarm.seed(crop, this.world.harvestables);
         modal.classList.remove('show');
       });
     });
@@ -114,13 +126,17 @@ class Game {
 
   _updateSeedModal() {
     if (!this._seedModal) return;
-    // Show when: farm unlocked, fully empty, no crop chosen yet, player inside
-    const inside = this.farm.isInside(this.player.group.position);
-    const shouldShow = this.farm.unlocked
-      && this.farm.isFullyEmpty()
-      && this.farm.cropKey === null
-      && inside;
-    this._seedModal.classList.toggle('show', shouldShow);
+    // Show when the player is standing inside an unlocked, unseeded farm.
+    // _pendingFarm is what the modal buttons will seed on click.
+    let pending = null;
+    for (const farm of this.farms) {
+      if (!farm.unlocked) continue;
+      if (!farm.isFullyEmpty()) continue;
+      if (farm.cropKey !== null) continue; // already chosen → auto re-seeds
+      if (farm.isInside(this.player.group.position)) { pending = farm; break; }
+    }
+    this._pendingFarm = pending;
+    this._seedModal.classList.toggle('show', !!pending);
   }
 
   _bindHireButton() {
@@ -205,15 +221,34 @@ class Game {
     }
   }
 
-  _updateFarm(dt) {
-    const unlockLevel = CONFIG.farm.unlockAtBalerLevel;
-    const balerLevel = this.builds.sites.hayBaler.level;
-    const shouldUnlock = balerLevel >= unlockLevel;
-    if (shouldUnlock !== this.farm.unlocked) {
-      this.farm.setUnlocked(shouldUnlock);
-      if (shouldUnlock) toast('🌱 Farm plot unlocked! Plant seeds.');
+  _updateFactoryUnlocks() {
+    // Any farm with tomato unlocks the sauce factory; any with potato opens
+    // the chips factory.
+    const anyTomato = this.farms.some((f) => f.cropKey === 'tomato');
+    const anyPotato = this.farms.some((f) => f.cropKey === 'potato');
+    if (anyTomato && this.builds.sites.sauceFactory._locked) {
+      this.builds.sites.sauceFactory.setLocked(false);
+      this.builds._updateActive();
+      toast('🍶 Sauce Factory plot opened — build it!');
     }
-    this.farm.update(dt, this.world.harvestables);
+    if (anyPotato && this.builds.sites.chipsFactory._locked) {
+      this.builds.sites.chipsFactory.setLocked(false);
+      this.builds._updateActive();
+      toast('🍟 Chips Factory plot opened — build it!');
+    }
+  }
+
+  _updateFarm(dt) {
+    for (const farm of this.farms) {
+      const unlockLevel = farm.cfg.unlockAtBalerLevel;
+      const balerLevel = this.builds.sites.hayBaler.level;
+      const shouldUnlock = balerLevel >= unlockLevel;
+      if (shouldUnlock !== farm.unlocked) {
+        farm.setUnlocked(shouldUnlock);
+        if (shouldUnlock) toast('🌱 Farm plot unlocked! Plant seeds.');
+      }
+      farm.update(dt, this.world.harvestables);
+    }
     this._updateSeedModal();
   }
 
@@ -399,6 +434,7 @@ class Game {
     this.helpers.update(dt);
     this.ambient.update(dt);
     this._updateFarm(dt);
+    this._updateFactoryUnlocks();
     this._updatePickupables(dt);
     this._updateDropoff();
     this._updateMarketSystems(dt);

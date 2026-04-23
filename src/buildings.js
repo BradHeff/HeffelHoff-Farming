@@ -301,7 +301,9 @@ export class BuildSite {
 
   _attachDropZone() {
     if (this.key === 'market') {
-      this.dropoffPos = new THREE.Vector3(this.position.x, 0, this.position.z - 2.8);
+      // SELL tile sits NORTH of the customer queue (player side) so the
+      // player isn't standing inside the customer line when depositing.
+      this.dropoffPos = new THREE.Vector3(this.position.x, 0, this.position.z - 3.8);
       return;
     }
     const offsetZ = 2.5; // DROP tile appears in front (south) of building
@@ -393,13 +395,15 @@ export class BuildSite {
           g.add(p);
         }
       }
-      for (let i = 0; i < 6; i++) {
+      // Awning covers only the back half of the stall so it doesn't visually
+      // overhang the front counter table / product crates at the camera tilt.
+      for (let i = 0; i < 4; i++) {
         const color = i % 2 === 0 ? 0xffffff : 0x2e8b57;
         const stripe = new THREE.Mesh(
-          new THREE.BoxGeometry(3.3, 0.04, 0.26),
+          new THREE.BoxGeometry(3.3, 0.04, 0.3),
           new THREE.MeshLambertMaterial({ color })
         );
-        stripe.position.set(0, 2.3, -1.35 + i * 0.26);
+        stripe.position.set(0, 2.3, -0.3 + i * 0.32);
         g.add(stripe);
       }
       // Counter TABLE at the player-facing front (south of stall)
@@ -476,6 +480,77 @@ export class BuildSite {
           g.add(log);
         }
       }
+    } else if (this.key === 'sauceFactory') {
+      const s = lvl === 1 ? 1.0 : (lvl === 2 ? 1.12 : 1.25);
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(2.6 * s, 2.0 * s, 2.4 * s),
+        new THREE.MeshLambertMaterial({ color: 0xd6584a })
+      );
+      body.position.y = 1.0 * s;
+      const roofMat = new THREE.MeshLambertMaterial({ color: 0x7a2420 });
+      const roofL = new THREE.Mesh(new THREE.BoxGeometry(3.0 * s, 0.12, 1.7 * s), roofMat);
+      roofL.rotation.z = 0.45; roofL.position.set(-0.6 * s, 2.3 * s, 0);
+      const roofR = roofL.clone(); roofR.rotation.z = -0.45; roofR.position.set(0.6 * s, 2.3 * s, 0);
+      const pad = new THREE.Mesh(
+        new THREE.BoxGeometry(2.6, 0.08, 1.6),
+        new THREE.MeshLambertMaterial({ color: 0x8a6b42 })
+      );
+      pad.position.set(2.7 + (lvl - 1) * 0.3, 0.04, 0);
+      g.add(body, roofL, roofR, pad);
+      this._buildConveyor(g, 1.5, 4.0);
+      if (lvl >= 2) {
+        // Steam stack
+        const stack = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.22, 0.22, 1.2, 10),
+          new THREE.MeshLambertMaterial({ color: 0x5a5a5a })
+        );
+        stack.position.set(-0.8, 3.0, 0);
+        g.add(stack);
+      }
+      if (lvl >= 3) {
+        // Big bottle prop on the roof
+        const bottle = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.25, 0.3, 0.8, 12),
+          new THREE.MeshLambertMaterial({ color: 0xd02e2a })
+        );
+        bottle.position.set(0.5, 3.2, 0);
+        g.add(bottle);
+      }
+    } else if (this.key === 'chipsFactory') {
+      const s = lvl === 1 ? 1.0 : (lvl === 2 ? 1.12 : 1.25);
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(2.6 * s, 2.0 * s, 2.4 * s),
+        new THREE.MeshLambertMaterial({ color: 0xe6b548 })
+      );
+      body.position.y = 1.0 * s;
+      const roofMat = new THREE.MeshLambertMaterial({ color: 0x7a5a20 });
+      const roofL = new THREE.Mesh(new THREE.BoxGeometry(3.0 * s, 0.12, 1.7 * s), roofMat);
+      roofL.rotation.z = 0.45; roofL.position.set(-0.6 * s, 2.3 * s, 0);
+      const roofR = roofL.clone(); roofR.rotation.z = -0.45; roofR.position.set(0.6 * s, 2.3 * s, 0);
+      const pad = new THREE.Mesh(
+        new THREE.BoxGeometry(2.6, 0.08, 1.6),
+        new THREE.MeshLambertMaterial({ color: 0x8a6b42 })
+      );
+      pad.position.set(2.7 + (lvl - 1) * 0.3, 0.04, 0);
+      g.add(body, roofL, roofR, pad);
+      this._buildConveyor(g, 1.5, 4.0);
+      if (lvl >= 2) {
+        const stack = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.22, 0.22, 1.2, 10),
+          new THREE.MeshLambertMaterial({ color: 0x5a5a5a })
+        );
+        stack.position.set(-0.8, 3.0, 0);
+        g.add(stack);
+      }
+      if (lvl >= 3) {
+        // Big chip bag on the roof
+        const bag = new THREE.Mesh(
+          new THREE.BoxGeometry(0.6, 0.9, 0.4),
+          new THREE.MeshLambertMaterial({ color: 0xf0c860 })
+        );
+        bag.position.set(0.5, 3.2, 0);
+        g.add(bag);
+      }
     } else if (this.key === 'fence') {
       const postMat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
       for (let a = 0; a < 16; a++) {
@@ -505,7 +580,7 @@ export class BuildSite {
       color: '#8fd1ff', textColor: 'rgba(255,255,255,0.95)',
       textSize: 120,
     });
-    sellDecal.setPosition(this.position.x, this.position.z - 2.8);
+    sellDecal.setPosition(this.position.x, this.position.z - 3.8);
     sellDecal.addTo(this.scene);
     this.sellDecal = sellDecal;
 
@@ -523,12 +598,16 @@ export class BuildSite {
       planks: new THREE.MeshLambertMaterial({ color: 0xb77842 }),
       tomato: new THREE.MeshLambertMaterial({ color: 0xe04a3c }),
       potato: new THREE.MeshLambertMaterial({ color: 0xc49a5a }),
+      sauce:  new THREE.MeshLambertMaterial({ color: 0xd02e2a }),
+      chips:  new THREE.MeshLambertMaterial({ color: 0xe6b548 }),
     };
     this._stockGeos = {
       bale:   new THREE.CylinderGeometry(0.22, 0.22, 0.36, 12),
       planks: new THREE.BoxGeometry(0.55, 0.08, 0.22),
       tomato: new THREE.SphereGeometry(0.2, 10, 8),
       potato: new THREE.SphereGeometry(0.18, 8, 6),
+      sauce:  new THREE.CylinderGeometry(0.11, 0.13, 0.3, 10),
+      chips:  new THREE.BoxGeometry(0.28, 0.22, 0.2),
     };
     this._stockGeos.bale.rotateZ(Math.PI / 2);
 
@@ -536,10 +615,12 @@ export class BuildSite {
     const tableY = 1.05;
     const tableZ = this.position.z - 1.7;
     this._stockColumns = {
-      bale:   { x: this.position.x - 1.1, y: tableY, z: tableZ, maxStack: 4 },
-      planks: { x: this.position.x - 0.3, y: tableY, z: tableZ, maxStack: 4 },
-      tomato: { x: this.position.x + 0.5, y: tableY, z: tableZ, maxStack: 4 },
-      potato: { x: this.position.x + 1.2, y: tableY, z: tableZ, maxStack: 4 },
+      bale:   { x: this.position.x - 1.35, y: tableY, z: tableZ, maxStack: 4 },
+      planks: { x: this.position.x - 0.8,  y: tableY, z: tableZ, maxStack: 4 },
+      tomato: { x: this.position.x - 0.25, y: tableY, z: tableZ, maxStack: 4 },
+      potato: { x: this.position.x + 0.3,  y: tableY, z: tableZ, maxStack: 4 },
+      sauce:  { x: this.position.x + 0.85, y: tableY, z: tableZ, maxStack: 4 },
+      chips:  { x: this.position.x + 1.4,  y: tableY, z: tableZ, maxStack: 4 },
     };
     // Wooden crate wrapper per column so stacks look like crated goods
     const crateMat = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
@@ -564,7 +645,7 @@ export class BuildSite {
       crateGroup.add(rim);
       this.scene.add(crateGroup);
     }
-    this._stockMeshes = { bale: [], planks: [], tomato: [], potato: [] };
+    this._stockMeshes = { bale: [], planks: [], tomato: [], potato: [], sauce: [], chips: [] };
     this._refreshTableStock();
   }
 
@@ -616,7 +697,8 @@ export class BuildSite {
     const pc = this.producerCfg;
     if (!pc) return;
 
-    if (this.key === 'hayBaler' || this.key === 'sawMill') {
+    if (this.key === 'hayBaler' || this.key === 'sawMill' ||
+        this.key === 'sauceFactory' || this.key === 'chipsFactory') {
       this.producedItems = this.producedItems.filter((it) => !it.collected);
       if (this.producedItems.length < pc.maxStack) {
         this.produceTimer += dt;
@@ -637,28 +719,9 @@ export class BuildSite {
         it.mesh.position.y = it.baseY + Math.sin(elapsed * 2 + it.spawnTime * 0.001) * 0.03;
       }
     } else if (this.key === 'market') {
-      this.produceTimer += dt;
-      // Market only sells when there is an idle customer at the front of
-      // the queue AND stock exists. The CustomerQueue drives this: it sets
-      // `_saleRequested` when a customer is waiting to buy.
-      if (this.produceTimer >= pc.intervalSec && this._saleRequested) {
-        let sold = null;
-        for (const k of pc.sellPriority) {
-          if ((Inventory[k] || 0) > 0) {
-            Inventory[k] -= 1;
-            Inventory.emit();
-            const coins = pc.sellRewards[k] || 0;
-            this.coinPile.addPending(coins);
-            sold = k;
-            break;
-          }
-        }
-        if (sold) {
-          this.produceTimer = 0;
-          this._soldThisTick = sold;
-          this._saleRequested = false;
-        }
-      }
+      // Sales are now driven by individual customers in CustomerQueue —
+      // each one consumes its requested resource and pays coins directly.
+      // Market just keeps the visible stock display in sync with Inventory.
       this._refreshTableStock();
     }
   }
@@ -684,6 +747,18 @@ export class BuildSite {
         PRODUCE_PROTOS.planks = {
           geo: new THREE.BoxGeometry(0.7, 0.14, 0.3),
           mat: new THREE.MeshLambertMaterial({ color: 0xb77842 }),
+          rotZ: 0,
+        };
+      } else if (pc.produces === 'sauce') {
+        PRODUCE_PROTOS.sauce = {
+          geo: new THREE.CylinderGeometry(0.18, 0.22, 0.5, 12),
+          mat: new THREE.MeshLambertMaterial({ color: 0xd02e2a }),
+          rotZ: 0,
+        };
+      } else if (pc.produces === 'chips') {
+        PRODUCE_PROTOS.chips = {
+          geo: new THREE.BoxGeometry(0.4, 0.3, 0.28),
+          mat: new THREE.MeshLambertMaterial({ color: 0xe6b548 }),
           rotZ: 0,
         };
       }
@@ -741,10 +816,12 @@ export class BuildManager {
     this.scene = scene;
     this.pickupables = [];
     this.sites = {
-      hayBaler: new BuildSite(scene, 'hayBaler', CONFIG.world.buildPlots.hayBaler, this.pickupables),
-      market:   new BuildSite(scene, 'market',   CONFIG.world.buildPlots.market,   this.pickupables),
-      sawMill:  new BuildSite(scene, 'sawMill',  CONFIG.world.buildPlots.sawMill,  this.pickupables),
-      fence:    new BuildSite(scene, 'fence',    CONFIG.world.buildPlots.fence,    this.pickupables),
+      hayBaler:     new BuildSite(scene, 'hayBaler',     CONFIG.world.buildPlots.hayBaler,     this.pickupables),
+      market:       new BuildSite(scene, 'market',       CONFIG.world.buildPlots.market,       this.pickupables),
+      sawMill:      new BuildSite(scene, 'sawMill',      CONFIG.world.buildPlots.sawMill,      this.pickupables),
+      fence:        new BuildSite(scene, 'fence',        CONFIG.world.buildPlots.fence,        this.pickupables),
+      sauceFactory: new BuildSite(scene, 'sauceFactory', CONFIG.world.buildPlots.sauceFactory, this.pickupables),
+      chipsFactory: new BuildSite(scene, 'chipsFactory', CONFIG.world.buildPlots.chipsFactory, this.pickupables),
     };
     this.hasEnemies = false;
     this._subs = new Set();
@@ -760,8 +837,8 @@ export class BuildManager {
   }
 
   _priorityOrder() {
-    if (this.hasEnemies) return ['fence', 'sawMill', 'hayBaler', 'market'];
-    return ['hayBaler', 'sawMill', 'market', 'fence'];
+    if (this.hasEnemies) return ['fence', 'sawMill', 'hayBaler', 'sauceFactory', 'chipsFactory', 'market'];
+    return ['hayBaler', 'sawMill', 'sauceFactory', 'chipsFactory', 'market', 'fence'];
   }
 
   _updateActive() {

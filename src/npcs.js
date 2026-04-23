@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { Inventory } from './state.js';
-
-const RES_ICONS = { grass: '🌿', wood: '🪵', bale: '🌾', planks: '🪚', coin: '🪙' };
+// Import shared icon map so customer bubbles show the real emoji for tomato /
+// potato instead of falling back to "?".
+import { RES_ICONS } from './hud.js';
 
 // Shared chibi geometry pool — created ONCE at module load. Every spawned
 // NPC reuses these buffers. Materials per-color are cached below.
@@ -10,14 +11,21 @@ const CHIBI_GEOS = {
   leg: new THREE.CapsuleGeometry(0.13, 0.35, 4, 8),
   torso: new THREE.CapsuleGeometry(0.26, 0.3, 4, 10),
   head: new THREE.SphereGeometry(0.26, 16, 12),
-  eye: new THREE.SphereGeometry(0.035, 6, 6),
+  eye: new THREE.SphereGeometry(0.04, 6, 6),
   hat: new THREE.CylinderGeometry(0.38, 0.38, 0.06, 18),
+  hatTop: new THREE.SphereGeometry(0.22, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+  arm: new THREE.CapsuleGeometry(0.09, 0.28, 4, 6),
+  hand: new THREE.SphereGeometry(0.11, 10, 8),
+  mouth: new THREE.SphereGeometry(0.05, 8, 6),
+  hair: new THREE.SphereGeometry(0.28, 12, 8),
 };
 const CHIBI_SKIN_MAT = new THREE.MeshLambertMaterial({ color: 0xffcf87 });
 const CHIBI_PANTS_MAT = new THREE.MeshLambertMaterial({ color: 0x333a55 });
 const CHIBI_EYE_MAT = new THREE.MeshBasicMaterial({ color: 0x1a1a1a });
+const CHIBI_MOUTH_MAT = new THREE.MeshBasicMaterial({ color: 0x8a3020 });
 const CHIBI_SHIRT_MATS = new Map(); // keyed by color int
 const CHIBI_HAT_MATS = new Map();
+const CHIBI_HAIR_MATS = new Map();
 function chibiShirtMat(color) {
   let m = CHIBI_SHIRT_MATS.get(color);
   if (!m) { m = new THREE.MeshLambertMaterial({ color }); CHIBI_SHIRT_MATS.set(color, m); }
@@ -28,12 +36,43 @@ function chibiHatMat(color) {
   if (!m) { m = new THREE.MeshLambertMaterial({ color }); CHIBI_HAT_MATS.set(color, m); }
   return m;
 }
+function chibiHairMat(color) {
+  let m = CHIBI_HAIR_MATS.get(color);
+  if (!m) { m = new THREE.MeshLambertMaterial({ color }); CHIBI_HAIR_MATS.set(color, m); }
+  return m;
+}
 
-// Rounded chibi NPC using shared capsule + sphere primitives.
-function makeChibi(color, hatColor = 0xc69645) {
+const HAIR_COLORS = [0x3a2412, 0x8a5232, 0xd4a552, 0x5a3820, 0x2a2018, 0xa86a42];
+
+// Shared walk-cycle helpers so every NPC animates the same way.
+function animateWalk(group, phase) {
+  const legs = group.userData.legs;
+  const arms = group.userData.arms;
+  if (legs) {
+    legs[0].rotation.x = Math.sin(phase) * 0.7;
+    legs[1].rotation.x = -Math.sin(phase) * 0.7;
+  }
+  if (arms) {
+    arms[0].rotation.x = -Math.sin(phase) * 0.5;
+    arms[1].rotation.x =  Math.sin(phase) * 0.5;
+  }
+}
+function damperWalk(group) {
+  const legs = group.userData.legs;
+  const arms = group.userData.arms;
+  if (legs) { legs[0].rotation.x *= 0.8; legs[1].rotation.x *= 0.8; }
+  if (arms) { arms[0].rotation.x *= 0.8; arms[1].rotation.x *= 0.8; }
+}
+
+// Rounded chibi NPC with shared capsule/sphere primitives. Now includes
+// arms+hands (animated on walk), a mouth, and visible hair under the hat so
+// each NPC reads as an actual character rather than a hatstand.
+function makeChibi(color, hatColor = 0xc69645, hairColor = null) {
   const g = new THREE.Group();
   const shirt = chibiShirtMat(color);
   const hat = chibiHatMat(hatColor);
+  const hair = chibiHairMat(hairColor ?? HAIR_COLORS[Math.floor(Math.random() * HAIR_COLORS.length)]);
+
   const legL = new THREE.Mesh(CHIBI_GEOS.leg, CHIBI_PANTS_MAT);
   legL.position.set(-0.14, 0.3, 0);
   const legR = new THREE.Mesh(CHIBI_GEOS.leg, CHIBI_PANTS_MAT);
@@ -44,19 +83,49 @@ function makeChibi(color, hatColor = 0xc69645) {
   torso.position.y = 0.85;
   g.add(torso);
 
+  // Arms on each side of torso; animated on walk
+  const armL = new THREE.Mesh(CHIBI_GEOS.arm, shirt);
+  armL.position.set(-0.32, 0.95, 0);
+  const armR = new THREE.Mesh(CHIBI_GEOS.arm, shirt);
+  armR.position.set(0.32, 0.95, 0);
+  g.add(armL, armR);
+  // Hands parented to arms so they swing together
+  const handL = new THREE.Mesh(CHIBI_GEOS.hand, CHIBI_SKIN_MAT);
+  handL.position.set(0, -0.25, 0);
+  armL.add(handL);
+  const handR = new THREE.Mesh(CHIBI_GEOS.hand, CHIBI_SKIN_MAT);
+  handR.position.set(0, -0.25, 0);
+  armR.add(handR);
+
+  // Hair: sphere under the hat, flattened and sticking out at the back/sides
+  const hairMesh = new THREE.Mesh(CHIBI_GEOS.hair, hair);
+  hairMesh.position.y = 1.5;
+  hairMesh.scale.set(1.02, 0.65, 1.02);
+  g.add(hairMesh);
+
   const head = new THREE.Mesh(CHIBI_GEOS.head, CHIBI_SKIN_MAT);
   head.position.y = 1.45;
   g.add(head);
 
-  const eL = new THREE.Mesh(CHIBI_GEOS.eye, CHIBI_EYE_MAT); eL.position.set(-0.09, 1.48, 0.24);
-  const eR = new THREE.Mesh(CHIBI_GEOS.eye, CHIBI_EYE_MAT); eR.position.set(0.09, 1.48, 0.24);
+  // Eyes + mouth for facial expression
+  const eL = new THREE.Mesh(CHIBI_GEOS.eye, CHIBI_EYE_MAT); eL.position.set(-0.10, 1.48, 0.23);
+  const eR = new THREE.Mesh(CHIBI_GEOS.eye, CHIBI_EYE_MAT); eR.position.set( 0.10, 1.48, 0.23);
   g.add(eL, eR);
+  const mouth = new THREE.Mesh(CHIBI_GEOS.mouth, CHIBI_MOUTH_MAT);
+  mouth.position.set(0, 1.35, 0.24);
+  mouth.scale.set(1.3, 0.45, 0.6);
+  g.add(mouth);
 
+  // Hat with a rounded top so it reads as a real hat, not a disc
   const hatMesh = new THREE.Mesh(CHIBI_GEOS.hat, hat);
   hatMesh.position.y = 1.7;
   g.add(hatMesh);
+  const hatTop = new THREE.Mesh(CHIBI_GEOS.hatTop, hat);
+  hatTop.position.y = 1.7;
+  g.add(hatTop);
 
   g.userData.legs = [legL, legR];
+  g.userData.arms = [armL, armR];
   g.userData.torso = torso;
   return g;
 }
@@ -70,15 +139,37 @@ function makeChibi(color, hatColor = 0xc69645) {
 // whenever the head is waiting and we want to buy. Market consumes from
 // Inventory and replies with market._soldThisTick (key of sold resource).
 export class CustomerQueue {
-  constructor(scene, camera, marketSite, flightManager) {
+  constructor(scene, camera, marketSite, flightManager, buildManager, farms) {
     this.scene = scene;
     this.camera = camera;
     this.marketSite = marketSite;
     this.flight = flightManager;
+    // Used to compute which resources exist in-world so customers only ask
+    // for items the player can actually produce.
+    this.buildManager = buildManager;
+    this.farms = farms;
     this.active = false;
     this.customers = [];
     this.spawnTimer = 0;
     this._projVec = new THREE.Vector3();
+  }
+
+  // Returns the list of resource keys that are currently sellable. Grows as
+  // the player builds factories / plants crops.
+  _availableWants() {
+    const opts = [];
+    const sites = this.buildManager?.sites || {};
+    if (sites.hayBaler?.completed) opts.push('bale');
+    if (sites.sawMill?.completed) opts.push('planks');
+    if (this.farms) {
+      for (const farm of this.farms) {
+        if (farm.cropKey === 'tomato' && !opts.includes('tomato')) opts.push('tomato');
+        if (farm.cropKey === 'potato' && !opts.includes('potato')) opts.push('potato');
+      }
+    }
+    if (sites.sauceFactory?.completed) opts.push('sauce');
+    if (sites.chipsFactory?.completed) opts.push('chips');
+    return opts;
   }
 
   setActive(v) {
@@ -104,48 +195,55 @@ export class CustomerQueue {
 
   _spawn() {
     const cfg = CONFIG.customers;
-    // Count active (not leaving) to determine next free slot
     const activeCount = this.customers.filter((c) => c.state !== 'leave').length;
     if (activeCount >= cfg.maxQueue) return;
+    // No unlocked resources → no point spawning customers with nothing to ask for
+    const options = this._availableWants();
+    if (options.length === 0) return;
+
     const slot = activeCount;
     const color = cfg.colors[Math.floor(Math.random() * cfg.colors.length)];
     const group = makeChibi(color, 0xffffff);
-    const entry = this._slotPos(cfg.maxQueue + 1); // walk in from past the last slot
+    const entry = this._slotPos(cfg.maxQueue + 1);
     group.position.set(entry.x, 0, entry.z);
     group.rotation.y = Math.atan2(-cfg.queueDir.x, -cfg.queueDir.z);
     this.scene.add(group);
 
+    // Each customer wants a specific resource and quantity they can actually
+    // buy given the current production chain.
+    const wantKey = options[Math.floor(Math.random() * options.length)];
+    const wantQty = 1 + Math.floor(Math.random() * 3);
+
     const bubble = document.createElement('div');
     bubble.className = 'npc-bubble';
-    const options = ['bale', 'planks', 'tomato', 'potato'];
-    const wantType = options[Math.floor(Math.random() * options.length)];
-    bubble.textContent = `${1 + Math.floor(Math.random() * 3)} ${RES_ICONS[wantType] || '?'}`;
+    bubble.textContent = `${wantQty} ${RES_ICONS[wantKey] || '?'}`;
     document.getElementById('world-overlay').appendChild(bubble);
 
     const target = this._slotPos(slot);
     this.customers.push({
-      group,
-      bubble,
-      slot,
-      targetX: target.x,
-      targetZ: target.z,
+      group, bubble, slot,
+      targetX: target.x, targetZ: target.z,
       walkPhase: 0,
       state: 'approach',
       stateTimer: 0,
+      wantKey, wantQty,
+      serveTimer: 0,
     });
   }
 
   _reassignSlots() {
-    // After a customer leaves, shift everyone forward by one slot
-    const cfg = CONFIG.customers;
-    const staying = this.customers.filter((c) => c.state !== 'leave');
-    staying.sort((a, b) => a.slot - b.slot);
-    staying.forEach((c, i) => {
+    // Only customers actively waiting (or still walking in) count toward the
+    // queue order. Served customers in 'receive' or 'leave' vacate their
+    // slot immediately so the next person can become slot 0 and trigger the
+    // market's next sale.
+    const cfg = CONFIG.customers; void cfg;
+    const queueing = this.customers.filter((c) => c.state === 'wait' || c.state === 'approach');
+    queueing.sort((a, b) => a.slot - b.slot);
+    queueing.forEach((c, i) => {
       c.slot = i;
       const t = this._slotPos(i);
       c.targetX = t.x; c.targetZ = t.z;
-      // If they were already waiting, transition back to approach so they
-      // walk forward to the new slot smoothly.
+      // If they were standing still and their slot moved, step forward.
       if (c.state === 'wait') c.state = 'approach';
     });
   }
@@ -171,26 +269,37 @@ export class CustomerQueue {
           c.group.position.x += (dx / dist) * step;
           c.group.position.z += (dz / dist) * step;
           c.walkPhase += dt * 8;
-          if (c.group.userData.legs) {
-            c.group.userData.legs[0].rotation.x = Math.sin(c.walkPhase) * 0.7;
-            c.group.userData.legs[1].rotation.x = -Math.sin(c.walkPhase) * 0.7;
-          }
+          animateWalk(c.group, c.walkPhase);
+          // Face movement direction
+          c.group.rotation.y = Math.atan2(dx / dist, dz / dist);
         } else if (c.state === 'approach') {
           c.state = 'wait';
           c.stateTimer = 0;
+          // Face the market center (works from any queue placement).
+          const mp = this.marketSite.position;
+          c.group.rotation.y = Math.atan2(
+            mp.x - c.group.position.x,
+            mp.z - c.group.position.z
+          );
         }
-      } else if (c.group.userData.legs) {
-        c.group.userData.legs[0].rotation.x *= 0.8;
-        c.group.userData.legs[1].rotation.x *= 0.8;
+      } else {
+        damperWalk(c.group);
       }
 
-      if (c.state === 'receive') {
-        c.stateTimer += dt;
-        if (c.stateTimer > 0.55) {
-          c.state = 'leave';
-          // Walk out past the end of the queue
-          c.targetX = c.group.position.x + 8;
-          c.targetZ = c.group.position.z + 2;
+      // Independent serving logic: each waiting customer tries to buy their
+      // own wantKey. If stock is available, their serveTimer ticks up. After
+      // a short delay they pay coins + receive item via flight anim + leave.
+      // Multiple customers can be serving in parallel; out-of-stock ones
+      // just keep waiting.
+      if (c.state === 'wait' && !c.served) {
+        const stock = Inventory[c.wantKey] || 0;
+        if (stock >= c.wantQty) {
+          c.serveTimer += dt;
+          if (c.serveTimer >= 1.0) {
+            this._serveCustomer(c);
+          }
+        } else {
+          c.serveTimer = 0; // out of stock → reset timer, keep waiting
         }
       }
 
@@ -204,6 +313,7 @@ export class CustomerQueue {
     }
 
     // Remove fully-left customers once they're far from their exit point
+    let removedAny = false;
     for (let i = this.customers.length - 1; i >= 0; i--) {
       const c = this.customers[i];
       if (c.state !== 'leave') continue;
@@ -212,35 +322,45 @@ export class CustomerQueue {
       if (Math.hypot(dx, dz) < 0.2) {
         this._remove(c);
         this.customers.splice(i, 1);
+        removedAny = true;
       }
     }
+    if (removedAny) this._reassignSlots();
 
-    // Serve: if head customer is waiting, ask market to sell.
-    const head = this.customers.find((c) => c.slot === 0 && c.state === 'wait');
-    if (head) {
-      this.marketSite.requestSale();
-    }
-    // Check if market sold this tick; if so, animate bale → head customer
-    const sold = this.marketSite._soldThisTick;
-    this.marketSite._soldThisTick = null;
-    if (sold && head) {
-      head.state = 'receive';
-      head.stateTimer = 0;
-      const from = this.marketSite.getTopStockSlot(sold)
+    // Parallel serving: serve all waiting customers whose wants are met.
+    // Sales are driven per-customer (see the 'wait' block inside the loop
+    // above) so there's no single head-of-line bottleneck.
+  }
+
+  _serveCustomer(c) {
+    c.served = true;
+    // Consume items from Inventory
+    Inventory[c.wantKey] = Math.max(0, (Inventory[c.wantKey] || 0) - c.wantQty);
+    Inventory.emit();
+    // Pay out coins matching what they bought
+    const rewards = this.marketSite.producerCfg?.sellRewards || {};
+    const perUnit = rewards[c.wantKey] || 5;
+    this.marketSite.coinPile.addPending(perUnit * c.wantQty);
+    // Flight: one item flies from the table to the customer
+    if (this.flight) {
+      const proto = CUSTOMER_FLIGHT_PROTOS[c.wantKey] || CUSTOMER_FLIGHT_PROTOS.bale;
+      const from = this.marketSite.getTopStockSlot(c.wantKey)
         || this.marketSite.getAnyTableSlot()
         || new THREE.Vector3(this.marketSite.position.x, 1.2, this.marketSite.position.z);
-      if (this.flight) {
-        const proto = CUSTOMER_FLIGHT_PROTOS[sold] || CUSTOMER_FLIGHT_PROTOS.bale;
-        this.flight.spawn({
-          geometry: proto.geo, material: proto.mat,
-          startPos: from.clone(),
-          endFn: () => head.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)),
-          durationMs: 520, arcH: 1.4,
-        });
-      }
-      // Vacate head's slot for the next one
-      this._reassignSlots();
+      this.flight.spawn({
+        geometry: proto.geo, material: proto.mat,
+        startPos: from.clone(),
+        endFn: () => c.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)),
+        durationMs: 520, arcH: 1.4,
+      });
     }
+    // Walk off; next customer takes this slot
+    c.state = 'leave';
+    c.targetX = c.group.position.x + 6;
+    c.targetZ = c.group.position.z + 5;
+    // Hide bubble immediately
+    if (c.bubble) c.bubble.style.opacity = '0';
+    this._reassignSlots();
   }
 }
 
@@ -251,6 +371,8 @@ const CUSTOMER_FLIGHT_PROTOS = {
   planks: { geo: new THREE.BoxGeometry(0.5, 0.08, 0.18),         mat: new THREE.MeshLambertMaterial({ color: 0xb77842 }) },
   tomato: { geo: new THREE.SphereGeometry(0.18, 10, 8),          mat: new THREE.MeshLambertMaterial({ color: 0xe04a3c }) },
   potato: { geo: new THREE.SphereGeometry(0.16, 8, 6),           mat: new THREE.MeshLambertMaterial({ color: 0xc49a5a }) },
+  sauce:  { geo: new THREE.CylinderGeometry(0.1, 0.13, 0.3, 10), mat: new THREE.MeshLambertMaterial({ color: 0xd02e2a }) },
+  chips:  { geo: new THREE.BoxGeometry(0.25, 0.2, 0.2),          mat: new THREE.MeshLambertMaterial({ color: 0xe6b548 }) },
 };
 
 // Helper NPC — hireable farmer that walks meadow → deposit loop endlessly.
@@ -297,10 +419,7 @@ export class Helper {
       this.group.position.x += (dx / dist) * step;
       this.group.position.z += (dz / dist) * step;
       this.walkPhase += dt * 10;
-      if (this.group.userData.legs) {
-        this.group.userData.legs[0].rotation.x = Math.sin(this.walkPhase) * 0.8;
-        this.group.userData.legs[1].rotation.x = -Math.sin(this.walkPhase) * 0.8;
-      }
+      animateWalk(this.group, this.walkPhase);
       this.group.rotation.y = Math.atan2(dx / dist, dz / dist);
       return;
     }
@@ -419,17 +538,13 @@ export class WanderingNpc {
   update(dt) {
     if (this.idleTimer > 0) {
       this.idleTimer -= dt;
-      if (this.group.userData.legs) {
-        this.group.userData.legs[0].rotation.x *= 0.85;
-        this.group.userData.legs[1].rotation.x *= 0.85;
-      }
+      damperWalk(this.group);
       return;
     }
     const dx = this.target.x - this.group.position.x;
     const dz = this.target.z - this.group.position.z;
     const dist = Math.hypot(dx, dz);
     if (dist < 0.25) {
-      // Pause at target, then pick a new one
       this.idleTimer = 1.5 + Math.random() * 2.0;
       this._pickTarget();
       return;
@@ -438,10 +553,7 @@ export class WanderingNpc {
     this.group.position.x += (dx / dist) * step;
     this.group.position.z += (dz / dist) * step;
     this.walkPhase += dt * 8;
-    if (this.group.userData.legs) {
-      this.group.userData.legs[0].rotation.x = Math.sin(this.walkPhase) * 0.7;
-      this.group.userData.legs[1].rotation.x = -Math.sin(this.walkPhase) * 0.7;
-    }
+    animateWalk(this.group, this.walkPhase);
     this.group.rotation.y = Math.atan2(dx / dist, dz / dist);
   }
 }
@@ -503,10 +615,7 @@ export class BuildingWorker {
       this.group.position.x += (dx / dist) * step;
       this.group.position.z += (dz / dist) * step;
       this.walkPhase += dt * 10;
-      if (this.group.userData.legs) {
-        this.group.userData.legs[0].rotation.x = Math.sin(this.walkPhase) * 0.8;
-        this.group.userData.legs[1].rotation.x = -Math.sin(this.walkPhase) * 0.8;
-      }
+      animateWalk(this.group, this.walkPhase);
       this.group.rotation.y = Math.atan2(dx / dist, dz / dist);
       return;
     }

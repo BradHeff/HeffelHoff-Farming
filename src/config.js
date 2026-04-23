@@ -10,14 +10,18 @@ export const CONFIG = {
     forest: { minX: 2, maxX: 38, minZ: -38, maxZ: 0 },
     grassCount: 1200,
     treeCount: 200,
+    // Seconds before a harvested grass stalk regrows in place
+    grassRegrowSec: 30,
     // Spawn close to the store — market is pre-built on spawn so the farmer
     // always has a place to sell. Build plots are just north of spawn.
     spawnPos: { x: 0, z: 14 },
     buildPlots: {
-      market:   { x: 0, z: 22 },    // just south of spawn; pre-built
-      hayBaler: { x: 0, z: 2 },     // center of build row
-      sawMill:  { x: -12, z: 2 },
-      fence:    { x: 12, z: 2 },
+      market:      { x: 0, z: 22 },    // just south of spawn; pre-built
+      hayBaler:    { x: 0, z: 2 },     // center of build row
+      sawMill:     { x: -12, z: 2 },
+      fence:       { x: 12, z: 2 },
+      sauceFactory:{ x: -24, z: 8 },   // left side — unlocks after tomato chosen
+      chipsFactory:{ x:  24, z: 8 },   // right side — unlocks after potato chosen
     },
   },
   player: {
@@ -75,6 +79,22 @@ export const CONFIG = {
       reward: { coin: 0 },
       blurb: 'Defensive wall against enemies',
     },
+    sauceFactory: {
+      id: 'sauceFactory',
+      name: 'Sauce Factory',
+      icon: '🍶',
+      require: { wood: 18, grass: 14 },
+      reward: { coin: 15 },
+      blurb: 'Bottles tomato sauce',
+    },
+    chipsFactory: {
+      id: 'chipsFactory',
+      name: 'Chips Factory',
+      icon: '🥔',
+      require: { wood: 18, grass: 14 },
+      reward: { coin: 15 },
+      blurb: 'Packs potato chips',
+    },
   },
   // After completion, buildings become passive producers.
   producers: {
@@ -92,19 +112,33 @@ export const CONFIG = {
       intervalSec: 3.0,
       maxStack: 10,
     },
+    sauceFactory: {
+      produces: 'sauce',
+      consumeFrom: 'tomato',
+      consumePerCycle: 1,
+      intervalSec: 3.0,
+      maxStack: 10,
+    },
+    chipsFactory: {
+      produces: 'chips',
+      consumeFrom: 'potato',
+      consumePerCycle: 1,
+      intervalSec: 3.0,
+      maxStack: 10,
+    },
     // Market consumes stocked goods from Inventory and mints coins into the pile.
     market: {
       produces: 'coin',
       intervalSec: 1.8,
       // Coins per unit sold, by resource key
-      sellRewards: { bale: 8, planks: 12, tomato: 6, potato: 9 },
+      sellRewards: { bale: 8, planks: 12, tomato: 6, potato: 9, sauce: 18, chips: 22 },
       maxStackVisual: 120,
       // Market sells in this priority order when multiple goods are stocked
-      sellPriority: ['bale', 'planks', 'tomato', 'potato'],
+      sellPriority: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips'],
     },
   },
   // Resources that live in the carry slot (in front of player). Others on back.
-  carryResources: ['bale', 'planks', 'tomato', 'potato'],
+  carryResources: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips'],
   // Crop definitions for the farm plot
   crops: {
     tomato: {
@@ -121,11 +155,28 @@ export const CONFIG = {
     },
   },
   // Farm plot config — replaces old passive harvest
+  // Two separate farm plots so the player can grow different crops in
+  // parallel. Both unlock once the Hay Baler is upgraded.
+  farms: [
+    {
+      center: { x: -22, z: -6 },
+      cols: 5, rows: 3, spacing: 1.35,
+      unlockAtBalerLevel: 2,
+      reseedDelayMs: 700,
+      harvestYield: 1,
+    },
+    {
+      center: { x: 22, z: -10 },
+      cols: 5, rows: 3, spacing: 1.35,
+      unlockAtBalerLevel: 2,
+      reseedDelayMs: 700,
+      harvestYield: 1,
+    },
+  ],
+  // Legacy single-farm reference, kept for any imports that still use it.
   farm: {
     center: { x: -22, z: -6 },
-    cols: 5,
-    rows: 3,
-    spacing: 1.35,
+    cols: 5, rows: 3, spacing: 1.35,
     unlockAtBalerLevel: 2,
     reseedDelayMs: 700,
     harvestYield: 1,
@@ -142,6 +193,14 @@ export const CONFIG = {
       { level: 2, require: { wood: 12, grass: 10 }, intervalMul: 0.7, stackMul: 1.0 },
       { level: 3, require: { wood: 25, bale: 8 },   intervalMul: 0.5, stackMul: 1.0 },
     ],
+    sauceFactory: [
+      { level: 2, require: { tomato: 10, planks: 6 }, intervalMul: 0.7, stackMul: 1.0 },
+      { level: 3, require: { tomato: 20, planks: 12 }, intervalMul: 0.5, stackMul: 1.0 },
+    ],
+    chipsFactory: [
+      { level: 2, require: { potato: 10, planks: 6 }, intervalMul: 0.7, stackMul: 1.0 },
+      { level: 3, require: { potato: 20, planks: 12 }, intervalMul: 0.5, stackMul: 1.0 },
+    ],
   },
   // Upgrade tile sits south-west of the building, hire tile south-east.
   // These are in front of the building (south) so they don't overlap the
@@ -152,7 +211,9 @@ export const CONFIG = {
   buildingInputs: {
     hayBaler: ['grass'],
     sawMill: ['wood'],
-    market: ['bale', 'planks', 'tomato', 'potato'],
+    sauceFactory: ['tomato'],
+    chipsFactory: ['potato'],
+    market: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips'],
   },
   // Per-building hire tile config — unlocked at Level 2. Hiring spawns a
   // worker that picks up produced items and delivers them to the market.
@@ -174,14 +235,17 @@ export const CONFIG = {
     { key: 'speed',       x: -4, z: 8 },
     { key: 'slashRadius', x:  4, z: 8 },
   ],
-  // Cosmetic customer NPCs at the market — forms to the east of the stall.
+  // Customer queue — on the SOUTH side of the store (behind, from the
+  // player's viewpoint). Market sits at (0, 22), queue at z=25 so customers
+  // queue between store and the camera. Player deposits from the north side
+  // via the SELL tile.
   customers: {
-    queueStart: { x: 4.0, z: 24 },
+    queueStart: { x: -1.5, z: 25 },
     queueDir:   { x: 1, z: 0 },
-    spacing: 1.2,
-    maxQueue: 3,
-    spawnIntervalSec: 4.0,
-    leaveAfterSec: 2.0,
+    spacing: 1.0,
+    maxQueue: 4,
+    spawnIntervalSec: 2.5,
+    leaveAfterSec: 1.2,
     colors: [0x3a7dd6, 0xd4493c, 0x8a5ed1, 0xd4a53a, 0x3e9d6e, 0xd07878, 0x58b0c9],
   },
   // Passive harvest parameters (applies inside any farm plot)

@@ -52,6 +52,8 @@ body {
   flex-direction: column;
   justify-content: space-between;
   padding: env(safe-area-inset-top, 12px) 14px env(safe-area-inset-bottom, 12px);
+  /* Above world-space overlay cards so resource pills never get covered. */
+  z-index: 40;
 }
 
 .hud-top {
@@ -60,6 +62,8 @@ body {
   justify-content: flex-start;
   flex-wrap: wrap;
   padding-top: 12px;
+  position: relative;
+  z-index: 41;
 }
 
 .resource-pill {
@@ -238,6 +242,9 @@ body {
   inset: 0;
   pointer-events: none;
   overflow: hidden;
+  /* Below the HUD — floating upgrade/hire/NPC bubble cards should not
+     cover the resource counters at the top of the screen. */
+  z-index: 5;
 }
 
 .build-panel {

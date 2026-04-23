@@ -1,0 +1,11 @@
+{
+  "appId": "com.hefflhoff.farm",
+  "appName": "HefflHoff Farm",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

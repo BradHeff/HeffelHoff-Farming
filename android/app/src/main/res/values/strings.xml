@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">HefflHoff Farm</string>
+    <string name="title_activity_main">HefflHoff Farm</string>
+    <string name="package_name">com.hefflhoff.farm</string>
+    <string name="custom_url_scheme">com.hefflhoff.farm</string>
+</resources>

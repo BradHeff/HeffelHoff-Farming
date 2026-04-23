@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#1a3a1a" />
+    <title>HefflHoff Farm</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="game-root">
+      <canvas id="game-canvas"></canvas>
+      <div id="hud">
+        <div class="hud-top">
+          <div class="resource-pill" data-key="wood">
+            <span class="icon">🪵</span><span class="count" data-count="wood">0</span>
+          </div>
+          <div class="resource-pill" data-key="grass">
+            <span class="icon">🌿</span><span class="count" data-count="grass">0</span>
+          </div>
+          <div class="resource-pill" data-key="bale">
+            <span class="icon">🌾</span><span class="count" data-count="bale">0</span>
+          </div>
+          <div class="resource-pill" data-key="planks">
+            <span class="icon">🪚</span><span class="count" data-count="planks">0</span>
+          </div>
+          <div class="resource-pill" data-key="coin">
+            <span class="icon">🪙</span><span class="count" data-count="coin">0</span>
+          </div>
+        </div>
+        <div class="hud-center"></div>
+        <div class="hud-bottom">
+          <div id="hud-side">
+            <button id="hire-btn" class="hud-btn">👨‍🌾 Hire <span id="hire-cost">150</span>🪙</button>
+          </div>
+          <div id="joystick-zone"></div>
+        </div>
+      </div>
+      <div id="toast"></div>
+      <!-- World-space DOM overlay (position updated per frame from main.js) -->
+      <div id="world-overlay">
+        <div id="build-panel" class="build-panel">
+          <div class="build-head">
+            <span class="build-icon" id="build-icon">🌾</span>
+            <span class="build-name" id="build-name">Hay Baler</span>
+          </div>
+          <div class="build-rows" id="build-rows"></div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

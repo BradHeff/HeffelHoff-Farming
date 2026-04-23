@@ -14,12 +14,16 @@ export class PickupManager {
       wood: new THREE.MeshLambertMaterial({ color: 0x8b5a2b }),
       bale: new THREE.MeshLambertMaterial({ color: 0xe2c35a }),
       planks: new THREE.MeshLambertMaterial({ color: 0xb77842 }),
+      tomato: new THREE.MeshLambertMaterial({ color: 0xe04a3c }),
+      potato: new THREE.MeshLambertMaterial({ color: 0xc49a5a }),
     };
     this.geos = {
       grass: new THREE.IcosahedronGeometry(0.22, 0),
       wood: new THREE.BoxGeometry(0.32, 0.22, 0.22),
       bale: new THREE.CylinderGeometry(0.2, 0.2, 0.3, 10),
       planks: new THREE.BoxGeometry(0.42, 0.08, 0.18),
+      tomato: new THREE.SphereGeometry(0.18, 10, 8),
+      potato: new THREE.SphereGeometry(0.16, 8, 6),
     };
   }
 

@@ -1,108 +1,144 @@
-// Virtual joystick for touch + WASD / arrow keys for desktop testing.
-// Output: `value.x`, `value.y` in [-1, 1], y = 1 means "up / forward".
-
+// Floating joystick — touch anywhere on the screen (outside UI buttons) to
+// spawn the joystick at the finger position. Drag to steer, lift to dismiss.
+// Keyboard still works for desktop testing.
 export class InputManager {
   constructor(zoneEl) {
     this.value = { x: 0, y: 0 };
-    this.keys = { w: false, a: false, s: false, d: false, up: false, down: false, left: false, right: false };
+    this.keys = { up: false, down: false, left: false, right: false };
 
     this._initJoystick(zoneEl);
     this._initKeyboard();
   }
 
-  _initJoystick(zone) {
+  _initJoystick() {
+    // We put the joystick overlay at the game-root level so it can appear
+    // anywhere. Elements marked with the `data-ui` attribute (buttons, modal
+    // controls) block the joystick — tapping those won't activate it.
+    this.root = document.getElementById('game-root');
     const pad = document.createElement('div');
     const stick = document.createElement('div');
     Object.assign(pad.style, {
-      position: 'absolute', left: '50%', top: '50%',
-      transform: 'translate(-50%,-50%)',
+      position: 'absolute',
+      left: '0px', top: '0px',
       width: '140px', height: '140px',
+      marginLeft: '-70px', marginTop: '-70px',
       borderRadius: '50%',
       background: 'rgba(255,255,255,0.10)',
       border: '2px solid rgba(255,255,255,0.25)',
-      backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+      backdropFilter: 'blur(4px)',
+      WebkitBackdropFilter: 'blur(4px)',
       pointerEvents: 'none',
+      display: 'none',
+      zIndex: 5,
     });
     Object.assign(stick.style, {
-      position: 'absolute', left: '50%', top: '50%',
-      transform: 'translate(-50%,-50%)',
+      position: 'absolute',
+      left: '0px', top: '0px',
       width: '64px', height: '64px',
+      marginLeft: '-32px', marginTop: '-32px',
       borderRadius: '50%',
       background: 'radial-gradient(circle at 35% 30%, #fff, #b9cad2 70%, #8aa0a8)',
       boxShadow: '0 2px 6px rgba(0,0,0,0.35)',
       pointerEvents: 'none',
+      display: 'none',
+      zIndex: 6,
     });
-    zone.appendChild(pad);
-    zone.appendChild(stick);
+    this.root.appendChild(pad);
+    this.root.appendChild(stick);
 
-    this.zone = zone;
     this.pad = pad;
     this.stick = stick;
     this.activeTouchId = null;
     this.origin = { x: 0, y: 0 };
-
-    const getRect = () => zone.getBoundingClientRect();
-    const radius = 60; // max travel of stick in px
+    this.radius = 60;
 
     const start = (clientX, clientY, id) => {
       this.activeTouchId = id;
-      const r = getRect();
-      this.origin.x = r.left + r.width / 2;
-      this.origin.y = r.top + r.height / 2;
-      move(clientX, clientY);
+      this.origin.x = clientX;
+      this.origin.y = clientY;
+      pad.style.display = 'block';
+      stick.style.display = 'block';
+      this._positionPad();
+      this._positionStick(clientX, clientY);
     };
     const move = (clientX, clientY) => {
-      const dx = clientX - this.origin.x;
-      const dy = clientY - this.origin.y;
-      const mag = Math.hypot(dx, dy);
-      const clamped = Math.min(mag, radius);
-      const angle = Math.atan2(dy, dx);
-      const cx = Math.cos(angle) * clamped;
-      const cy = Math.sin(angle) * clamped;
-      stick.style.transform = `translate(calc(-50% + ${cx}px), calc(-50% + ${cy}px))`;
-      // Convert to normalized, y up = positive
-      this.value.x = cx / radius;
-      this.value.y = -cy / radius;
+      this._positionStick(clientX, clientY);
     };
     const end = () => {
       this.activeTouchId = null;
-      stick.style.transform = 'translate(-50%,-50%)';
+      pad.style.display = 'none';
+      stick.style.display = 'none';
       this.value.x = 0;
       this.value.y = 0;
     };
 
-    zone.addEventListener('touchstart', (e) => {
-      e.preventDefault();
+    // Helper: determine whether a touch should activate the joystick. Ignores
+    // taps on anything with data-ui or pointer-events:auto except the canvas.
+    const isBlockingElement = (el) => {
+      let n = el;
+      while (n && n !== this.root) {
+        if (n.dataset && n.dataset.ui !== undefined) return true;
+        // Seed modal buttons, hire button, upgrade cards — anything
+        // explicitly pointer-events:auto that isn't the canvas blocks
+        if (n.classList && (
+          n.classList.contains('seed-btn') ||
+          n.classList.contains('hud-btn')
+        )) return true;
+        n = n.parentElement;
+      }
+      return false;
+    };
+
+    // TouchEvents — primary mobile path
+    this.root.addEventListener('touchstart', (e) => {
+      if (this.activeTouchId !== null) return;
       const t = e.changedTouches[0];
+      if (isBlockingElement(e.target)) return;
+      e.preventDefault();
       start(t.clientX, t.clientY, t.identifier);
     }, { passive: false });
-
-    zone.addEventListener('touchmove', (e) => {
-      e.preventDefault();
+    this.root.addEventListener('touchmove', (e) => {
       for (const t of e.changedTouches) {
         if (t.identifier === this.activeTouchId) {
+          e.preventDefault();
           move(t.clientX, t.clientY);
           break;
         }
       }
     }, { passive: false });
-
     const endHandler = (e) => {
       for (const t of e.changedTouches) {
         if (t.identifier === this.activeTouchId) { end(); break; }
       }
     };
-    zone.addEventListener('touchend', endHandler);
-    zone.addEventListener('touchcancel', endHandler);
+    this.root.addEventListener('touchend', endHandler);
+    this.root.addEventListener('touchcancel', endHandler);
 
     // Mouse fallback for desktop
     let mouseDown = false;
-    zone.addEventListener('mousedown', (e) => {
+    this.root.addEventListener('mousedown', (e) => {
+      if (isBlockingElement(e.target)) return;
       mouseDown = true;
       start(e.clientX, e.clientY, 'mouse');
     });
     window.addEventListener('mousemove', (e) => { if (mouseDown) move(e.clientX, e.clientY); });
     window.addEventListener('mouseup', () => { if (mouseDown) { mouseDown = false; end(); } });
+  }
+
+  _positionPad() {
+    this.pad.style.transform = `translate(${this.origin.x}px, ${this.origin.y}px)`;
+  }
+  _positionStick(clientX, clientY) {
+    const dx = clientX - this.origin.x;
+    const dy = clientY - this.origin.y;
+    const mag = Math.hypot(dx, dy);
+    const clamped = Math.min(mag, this.radius);
+    const angle = Math.atan2(dy, dx);
+    const cx = Math.cos(angle) * clamped;
+    const cy = Math.sin(angle) * clamped;
+    this.stick.style.transform = `translate(${this.origin.x + cx}px, ${this.origin.y + cy}px)`;
+    this.value.x = cx / this.radius;
+    this.value.y = -cy / this.radius;
   }
 
   _initKeyboard() {
@@ -122,7 +158,6 @@ export class InputManager {
     });
   }
 
-  // Merge keyboard and joystick. Keyboard wins if any key is pressed.
   getMove() {
     let kx = 0, ky = 0;
     if (this.keys.up) ky += 1;

@@ -1,21 +1,16 @@
 import { Inventory } from './state.js';
 
-export const RES_ICONS = { grass: '🌿', wood: '🪵', bale: '🌾', planks: '🪚', coin: '🪙', meat: '🥩' };
+export const RES_ICONS = {
+  grass: '🌿', wood: '🪵', bale: '🌾', planks: '🪚',
+  tomato: '🍅', potato: '🥔', coin: '🪙', meat: '🥩',
+};
 
 export function mountHUD() {
-  const els = {
-    wood: document.querySelector('[data-count="wood"]'),
-    grass: document.querySelector('[data-count="grass"]'),
-    bale: document.querySelector('[data-count="bale"]'),
-    planks: document.querySelector('[data-count="planks"]'),
-    coin: document.querySelector('[data-count="coin"]'),
-  };
+  const keys = ['wood', 'grass', 'bale', 'planks', 'tomato', 'potato', 'coin'];
+  const els = {};
+  for (const k of keys) els[k] = document.querySelector(`[data-count="${k}"]`);
   const renderInventory = () => {
-    els.wood.textContent = Inventory.wood;
-    els.grass.textContent = Inventory.grass;
-    els.bale.textContent = Inventory.bale;
-    els.planks.textContent = Inventory.planks;
-    els.coin.textContent = Inventory.coin;
+    for (const k of keys) if (els[k]) els[k].textContent = Inventory[k];
   };
   Inventory.subscribe(renderInventory);
   renderInventory();

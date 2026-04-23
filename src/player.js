@@ -257,13 +257,14 @@ export class Player {
     this.carryGroup.position.set(0, 0.9, 0.38);
     this.bodyGroup.add(this.carryGroup);
 
-    // Bales lay on their side as small cylinders
-    this.baleGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.36, 12);
-    this.baleGeo.rotateZ(Math.PI / 2);
-    this.baleMat = new THREE.MeshLambertMaterial({ color: 0xe2c35a });
-    // Planks are thin long boxes
-    this.planksGeo = new THREE.BoxGeometry(0.52, 0.08, 0.18);
-    this.planksMat = new THREE.MeshLambertMaterial({ color: 0xb77842 });
+    // Geometries + materials for each carried kind
+    this.carryKinds = {
+      bale:   { geo: new THREE.CylinderGeometry(0.22, 0.22, 0.36, 12), mat: new THREE.MeshLambertMaterial({ color: 0xe2c35a }), layerH: 0.22 },
+      planks: { geo: new THREE.BoxGeometry(0.52, 0.08, 0.18), mat: new THREE.MeshLambertMaterial({ color: 0xb77842 }), layerH: 0.12 },
+      tomato: { geo: new THREE.SphereGeometry(0.18, 10, 8), mat: new THREE.MeshLambertMaterial({ color: 0xe04a3c }), layerH: 0.18 },
+      potato: { geo: new THREE.SphereGeometry(0.16, 8, 6), mat: new THREE.MeshLambertMaterial({ color: 0xc49a5a }), layerH: 0.16 },
+    };
+    this.carryKinds.bale.geo.rotateZ(Math.PI / 2);
     this.carryMeshes = [];
 
     PlayerCarry.subscribe(() => this._updateCarry());
@@ -272,79 +273,69 @@ export class Player {
 
   _updateCarry() {
     const items = PlayerCarry.items;
-    // Stack bales first, then planks, so they don't interleave weirdly
     const seq = [];
-    for (let i = 0; i < (items.bale || 0); i++) seq.push('bale');
-    for (let i = 0; i < (items.planks || 0); i++) seq.push('planks');
+    for (const k of ['bale', 'planks', 'tomato', 'potato']) {
+      for (let i = 0; i < (items[k] || 0); i++) seq.push(k);
+    }
     while (this.carryMeshes.length < seq.length) {
-      const m = new THREE.Mesh(this.baleGeo, this.baleMat);
+      const m = new THREE.Mesh(this.carryKinds.bale.geo, this.carryKinds.bale.mat);
       m.visible = false;
       this.carryGroup.add(m);
       this.carryMeshes.push(m);
     }
+    let y = 0;
     for (let i = 0; i < this.carryMeshes.length; i++) {
       const mesh = this.carryMeshes[i];
       if (i >= seq.length) { mesh.visible = false; continue; }
       mesh.visible = true;
-      if (seq[i] === 'bale') {
-        mesh.geometry = this.baleGeo;
-        mesh.material = this.baleMat;
-      } else {
-        mesh.geometry = this.planksGeo;
-        mesh.material = this.planksMat;
-      }
-      const layer = i;
+      const kind = this.carryKinds[seq[i]];
+      mesh.geometry = kind.geo;
+      mesh.material = kind.mat;
       const wobble = ((i * 41) % 9 - 4) * 0.012;
-      mesh.position.set(wobble, layer * 0.18, 0);
+      mesh.position.set(wobble, y, 0);
       mesh.rotation.z = wobble * 0.5;
+      y += kind.layerH;
     }
   }
 
-  // GPS arrow — floating chevron (two angled planes forming a V) above head.
+  // GPS arrow — a single filled 2D arrow lying flat above the player's head
+  // that rotates on Y to point at its target. Apex is in local +Z so rotating
+  // by atan2(dx, dz) lines up with the world delta to the target.
   _buildGpsArrow() {
     const pivot = new THREE.Group();
-    pivot.position.set(0, 3.1, 0);
+    pivot.position.set(0, 3.0, 0);
     this.group.add(pivot);
 
+    const s = 0.55;
+    const shape = new THREE.Shape();
+    shape.moveTo(-0.35 * s, -0.6 * s);
+    shape.lineTo(-0.35 * s,  0.2 * s);
+    shape.lineTo(-0.78 * s,  0.2 * s);
+    shape.lineTo( 0.00 * s,  1.0 * s); // apex
+    shape.lineTo( 0.78 * s,  0.2 * s);
+    shape.lineTo( 0.35 * s,  0.2 * s);
+    shape.lineTo( 0.35 * s, -0.6 * s);
+    shape.closePath();
+    // ShapeGeometry builds in the XY plane; rotate +π/2 around X so apex
+    // maps from +Y to +Z and the whole arrow lies flat on the XZ plane.
+    const geo = new THREE.ShapeGeometry(shape);
+    geo.rotateX(Math.PI / 2);
+
     const bodyMat = new THREE.MeshBasicMaterial({
-      color: 0x4aa5ff, depthTest: false, transparent: true, opacity: 0.95,
-      side: THREE.DoubleSide,
+      color: 0x4aa5ff, side: THREE.DoubleSide,
+      transparent: true, opacity: 0.98, depthTest: false,
     });
     const outlineMat = new THREE.MeshBasicMaterial({
-      color: 0x0a3a66, depthTest: false, transparent: true, opacity: 0.95,
-      side: THREE.DoubleSide,
+      color: 0x0a2f52, side: THREE.DoubleSide,
+      transparent: true, opacity: 0.95, depthTest: false,
     });
-
-    // Three stacked chevrons pointing +Z
-    const makeChevron = (size, offsetZ) => {
-      const g = new THREE.Group();
-      const shape = new THREE.Shape();
-      shape.moveTo(-size * 0.5, -size * 0.25);
-      shape.lineTo(0, size * 0.4);
-      shape.lineTo(size * 0.5, -size * 0.25);
-      shape.lineTo(size * 0.22, -size * 0.25);
-      shape.lineTo(0, size * 0.1);
-      shape.lineTo(-size * 0.22, -size * 0.25);
-      shape.closePath();
-      const geo = new THREE.ShapeGeometry(shape);
-      geo.rotateX(-Math.PI / 2);
-      const m = new THREE.Mesh(geo, bodyMat);
-      const outline = new THREE.Mesh(geo, outlineMat);
-      outline.scale.setScalar(1.18);
-      outline.position.y = -0.01;
-      outline.renderOrder = 0;
-      m.renderOrder = 1;
-      g.add(outline, m);
-      g.position.z = offsetZ;
-      return g;
-    };
-
-    this.chevrons = [
-      makeChevron(0.65, 0.0),
-      makeChevron(0.55, -0.35),
-      makeChevron(0.45, -0.65),
-    ];
-    for (const c of this.chevrons) pivot.add(c);
+    const outline = new THREE.Mesh(geo, outlineMat);
+    outline.scale.setScalar(1.22);
+    outline.position.y = -0.02;
+    outline.renderOrder = 1;
+    const body = new THREE.Mesh(geo, bodyMat);
+    body.renderOrder = 2;
+    pivot.add(outline, body);
 
     this.gpsArrow = pivot;
     this.gpsArrow.visible = false;
@@ -355,17 +346,16 @@ export class Player {
     if (!this.gpsArrow) return;
     this.gpsArrow.visible = !!visible && !!targetPos;
     if (!this.gpsArrow.visible) return;
-    this._gpsBob += dt * 4.5;
-    this.gpsArrow.position.y = 3.1 + Math.sin(this._gpsBob) * 0.15;
+    this._gpsBob += dt * 3.5;
+    this.gpsArrow.position.y = 3.0 + Math.sin(this._gpsBob) * 0.15;
     const dx = targetPos.x - this.group.position.x;
     const dz = targetPos.z - this.group.position.z;
+    // atan2(dx, dz): with apex in local +Z, rotating by this aligns local
+    // +Z with the world (dx, dz) heading toward the target.
     this.gpsArrow.rotation.y = Math.atan2(dx, dz);
-    // Staggered pulse on each chevron for animation
-    for (let i = 0; i < this.chevrons.length; i++) {
-      const c = this.chevrons[i];
-      const s = 0.9 + Math.sin(this._gpsBob - i * 0.8) * 0.12;
-      c.scale.setScalar(s);
-    }
+    // Gentle pulse for liveliness
+    const s = 1 + Math.sin(this._gpsBob * 1.4) * 0.08;
+    this.gpsArrow.scale.set(s, 1, s);
   }
 
   update(dt, moveInput) {
@@ -386,7 +376,8 @@ export class Player {
       this.group.position.x = Math.max(-half, Math.min(half, this.group.position.x));
       this.group.position.z = Math.max(-half, Math.min(half, this.group.position.z));
       const targetYaw = Math.atan2(nx, nz);
-      this.bodyGroup.rotation.y = this._lerpAngle(this.bodyGroup.rotation.y, targetYaw, 1 - Math.exp(-12 * dt));
+      // Faster turn so changing direction (including southward) is snappy
+      this.bodyGroup.rotation.y = this._lerpAngle(this.bodyGroup.rotation.y, targetYaw, 1 - Math.exp(-18 * dt));
       this.forward.set(Math.sin(this.bodyGroup.rotation.y), 0, Math.cos(this.bodyGroup.rotation.y));
     } else {
       this.velocity.set(0, 0, 0);
@@ -441,14 +432,23 @@ export class Player {
   }
 
   // Where spawned pickups/carry items should fly toward on the player.
+  // Reuse pre-allocated locals + return a shared output vector to avoid GC
+  // pressure — these are called per pickup per frame.
   getCarryAnchor() {
-    // Front of torso in world space
-    const local = new THREE.Vector3(0, 1.2, 0.55);
-    return this.bodyGroup.localToWorld(local);
+    if (!this._carryLocal) {
+      this._carryLocal = new THREE.Vector3(0, 1.2, 0.55);
+      this._carryOut = new THREE.Vector3();
+    }
+    this._carryOut.copy(this._carryLocal);
+    return this.bodyGroup.localToWorld(this._carryOut);
   }
   getBackpackAnchor() {
-    const local = new THREE.Vector3(0, 1.35, -0.5);
-    return this.bodyGroup.localToWorld(local);
+    if (!this._backLocal) {
+      this._backLocal = new THREE.Vector3(0, 1.35, -0.5);
+      this._backOut = new THREE.Vector3();
+    }
+    this._backOut.copy(this._backLocal);
+    return this.bodyGroup.localToWorld(this._backOut);
   }
 
   _lerpAngle(a, b, t) {

@@ -214,6 +214,24 @@ body {
   transform: translateX(-50%) translateY(0);
 }
 
+#fps-meter {
+  position: absolute;
+  top: env(safe-area-inset-top, 8px);
+  right: 14px;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #aef;
+  font-family: monospace;
+  font-weight: 800;
+  font-size: 13px;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 30;
+  letter-spacing: 0.04em;
+}
+#fps-meter.bad { color: #ff7b7b; }
+#fps-meter.warn { color: #ffd34e; }
+
 /* World-space DOM overlay: transformed per frame from main.js */
 #world-overlay {
   position: absolute;
@@ -439,6 +457,98 @@ body {
   border: 6px solid transparent;
   border-top: 8px solid #222;
 }
+
+/* ---- Seed choice modal ---- */
+.seed-modal {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  background: rgba(20, 28, 20, 0.95);
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 18px;
+  padding: 16px 18px 14px;
+  color: #fff;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+  display: none;
+  z-index: 20;
+}
+.seed-modal.show { display: block; animation: seedin 0.2s ease-out; }
+@keyframes seedin { from { transform: translate(-50%, -40%) scale(0.9); opacity: 0; } }
+.seed-title {
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  font-size: 13px;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  color: #c8e6a0;
+}
+.seed-buttons { display: flex; gap: 10px; }
+.seed-btn {
+  background: #fff;
+  color: #1a2a18;
+  border: 2px solid #1a2a18;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 28px;
+  font-weight: 800;
+  min-width: 90px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 4px 0 #1a2a18;
+}
+.seed-btn span {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.seed-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 #1a2a18; }
+
+/* ---- Building level badge ---- */
+.level-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -100%);
+  background: #fff;
+  color: #1a2a18;
+  border: 2px solid #1a2a18;
+  border-radius: 12px;
+  padding: 6px 10px;
+  min-width: 100px;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+.level-card .title {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #5a6a5a;
+  text-align: center;
+  margin-bottom: 3px;
+}
+.level-card .lvl-row {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #2e7a2a;
+}
+.level-card .req {
+  display: flex;
+  gap: 5px;
+  justify-content: center;
+  margin-top: 4px;
+  font-size: 11px;
+}
+.level-card .req span.done { color: #2e7a2a; }
+.level-card .req span.missing { color: #b84040; }
 
 /* ---- Lock tooltip ---- */
 .lock-card {

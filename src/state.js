@@ -27,6 +27,8 @@ export const Inventory = {
   grass: 0,
   bale: 0,
   planks: 0,
+  tomato: 0,
+  potato: 0,
   coin: 0,
   _subs: new Set(),
   subscribe(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
@@ -65,10 +67,10 @@ export const Backpack = {
   },
 };
 
-// PlayerCarry — crafted items from factories (bales, planks). Rendered as a
-// stack in FRONT of the player (in their arms). Uncapped like the backpack.
+// PlayerCarry — crafted/harvested items (bales, planks, crops). Rendered as
+// a stack in FRONT of the player (in their arms). Uncapped.
 export const PlayerCarry = {
-  items: { bale: 0, planks: 0 },
+  items: { bale: 0, planks: 0, tomato: 0, potato: 0 },
   _subs: new Set(),
   subscribe(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
   emit() { this._subs.forEach((fn) => fn(this)); },

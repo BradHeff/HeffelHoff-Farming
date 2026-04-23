@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { ZoneDecal } from './zone.js';
+import { populateDecorations } from './decorations.js';
 
 function mulberry32(seed) {
   return function () {
@@ -25,43 +26,55 @@ export class World {
     this._buildGrassCarpet();
     this._buildForest();
     this._buildPerimeter();
-    this._buildPassiveHarvestZone();
+    populateDecorations(this.scene, this.rand);
   }
 
-  _buildPassiveHarvestZone() {
-    const pz = CONFIG.passiveHarvest;
-    this.passiveDecal = new ZoneDecal({
-      width: pz.radiusX * 2,
-      depth: pz.radiusZ * 2,
-      label: 'HARVEST', icon: '',
-      color: '#8fffb1', textColor: 'rgba(240,255,220,0.95)',
-      textSize: 110,
-    });
-    this.passiveDecal.setPosition(pz.center.x, pz.center.z);
-    this.passiveDecal.addTo(this.scene);
-    this.passiveCenter = new THREE.Vector3(pz.center.x, 0, pz.center.z);
-    this._passiveTimer = 0;
+  // Returns true if the point is inside any reserved clearing (build plots,
+  // spawn, farm, market). Used to avoid placing grass/trees on top of UI.
+  _isReserved(x, z) {
+    const reserved = this._reservedZones || this._buildReservedList();
+    for (const r of reserved) {
+      const dx = x - r.x;
+      const dz = z - r.z;
+      if (dx * dx + dz * dz < r.r * r.r) return true;
+    }
+    return false;
   }
 
-  // Returns a grass harvestable within `reach` of `pos` if the pos is inside
-  // the passive-harvest rectangle; else null.
-  tickPassiveHarvest(pos, dt) {
-    const pz = CONFIG.passiveHarvest;
-    const dx = pos.x - pz.center.x;
-    const dz = pos.z - pz.center.z;
-    if (Math.abs(dx) > pz.radiusX || Math.abs(dz) > pz.radiusZ) return null;
-    this._passiveTimer += dt;
-    if (this._passiveTimer < pz.intervalSec) return null;
-    this._passiveTimer = 0;
+  _buildReservedList() {
+    const plots = CONFIG.world.buildPlots;
+    const spawn = CONFIG.world.spawnPos;
+    const farm = CONFIG.farm;
+    const list = [
+      { x: spawn.x,  z: spawn.z,  r: 4 },
+      { x: plots.hayBaler.x, z: plots.hayBaler.z, r: 5 },
+      { x: plots.sawMill.x,  z: plots.sawMill.z,  r: 5 },
+      { x: plots.fence.x,    z: plots.fence.z,    r: 5 },
+      { x: plots.market.x,   z: plots.market.z,   r: 6 },
+      { x: farm.center.x,    z: farm.center.z,    r: Math.max(farm.cols, farm.rows) * farm.spacing / 2 + 1.5 },
+      // Upgrade tile row between spawn and build area
+      { x: -4, z: 8, r: 1.8 },
+      { x:  4, z: 8, r: 1.8 },
+    ];
+    this._reservedZones = list;
+    return list;
+  }
 
-    // Pick nearest grass within reach
+  // Passive farm-plot harvest: standing in `farm` plot with ready crops picks
+  // the nearest one on a timer. Returns the harvestable or null.
+  tickFarmHarvest(farm, pos, dt) {
+    if (!farm || !farm.unlocked) return null;
+    if (!farm.isInside(pos)) return null;
+    this._passiveTimer = (this._passiveTimer || 0) + dt;
+    if (this._passiveTimer < CONFIG.passiveHarvest.intervalSec) return null;
+    this._passiveTimer = 0;
     let best = null; let bestD = Infinity;
-    const r2 = pz.reach * pz.reach;
+    const r2 = CONFIG.passiveHarvest.reach * CONFIG.passiveHarvest.reach;
     for (const h of this.harvestables) {
-      if (h.removed || h.type !== 'grass') continue;
-      const ddx = h.position.x - pos.x;
-      const ddz = h.position.z - pos.z;
-      const d = ddx * ddx + ddz * ddz;
+      if (h.removed || h.kind !== 'cropCell') continue;
+      const dx = h.position.x - pos.x;
+      const dz = h.position.z - pos.z;
+      const d = dx * dx + dz * dz;
       if (d < bestD && d < r2) { bestD = d; best = h; }
     }
     return best;
@@ -78,36 +91,34 @@ export class World {
   }
 
   _buildBiomeOverlays() {
-    // Tint the ground under each biome so zones read clearly from the camera.
+    // Tint ground under each biome. polygonOffset prevents z-fighting with
+    // the base ground plane at y=0.
     const { meadow, forest } = CONFIG.world;
+    const mk = (color, opacity) => new THREE.MeshLambertMaterial({
+      color, transparent: true, opacity,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+      depthWrite: false,
+    });
 
     const meadowGeo = new THREE.PlaneGeometry(meadow.maxX - meadow.minX, meadow.maxZ - meadow.minZ);
     meadowGeo.rotateX(-Math.PI / 2);
-    const meadowMesh = new THREE.Mesh(
-      meadowGeo,
-      new THREE.MeshLambertMaterial({ color: CONFIG.colors.meadow, transparent: true, opacity: 0.6 })
-    );
-    meadowMesh.position.set((meadow.minX + meadow.maxX) / 2, 0.02, (meadow.minZ + meadow.maxZ) / 2);
+    const meadowMesh = new THREE.Mesh(meadowGeo, mk(CONFIG.colors.meadow, 0.85));
+    meadowMesh.position.set((meadow.minX + meadow.maxX) / 2, 0.01, (meadow.minZ + meadow.maxZ) / 2);
     this.scene.add(meadowMesh);
 
     const forestGeo = new THREE.PlaneGeometry(forest.maxX - forest.minX, forest.maxZ - forest.minZ);
     forestGeo.rotateX(-Math.PI / 2);
-    const forestMesh = new THREE.Mesh(
-      forestGeo,
-      new THREE.MeshLambertMaterial({ color: CONFIG.colors.forestFloor, transparent: true, opacity: 0.65 })
-    );
-    forestMesh.position.set((forest.minX + forest.maxX) / 2, 0.02, (forest.minZ + forest.maxZ) / 2);
+    const forestMesh = new THREE.Mesh(forestGeo, mk(CONFIG.colors.forestFloor, 0.85));
+    forestMesh.position.set((forest.minX + forest.maxX) / 2, 0.01, (forest.minZ + forest.maxZ) / 2);
     this.scene.add(forestMesh);
   }
 
   _buildGrassCarpet() {
-    // Tall wheat-stalk style carpet (matches the reference screenshots).
-    // Dense grid placement with jitter so it reads as a thick field rather
-    // than scattered tufts. One InstancedMesh for all stalks.
+    // Grass is a cluster of 3 tall thin blades merged into one geometry — this
+    // gives it a distinctive "tufty" look that reads clearly against the
+    // round-foliage trees, even at top-down angles.
     const { meadow, grassCount } = CONFIG.world;
-    // Tall narrow cone — reads as a wheat/grass stalk
-    const geo = new THREE.ConeGeometry(0.22, 1.1, 4);
-    geo.translate(0, 0.55, 0);
+    const geo = this._makeGrassTuftGeometry();
     const mat = new THREE.MeshLambertMaterial({ color: CONFIG.colors.grass });
     const mesh = new THREE.InstancedMesh(geo, mat, grassCount);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -117,7 +128,6 @@ export class World {
     const width = meadow.maxX - meadow.minX;
     const depth = meadow.maxZ - meadow.minZ;
 
-    // Near-grid placement: determine a cell count that fits grassCount
     const aspect = width / depth;
     const cellsZ = Math.max(1, Math.round(Math.sqrt(grassCount / aspect)));
     const cellsX = Math.max(1, Math.ceil(grassCount / cellsZ));
@@ -127,17 +137,23 @@ export class World {
     const colorA = new THREE.Color(CONFIG.colors.grass);
     const colorB = new THREE.Color(CONFIG.colors.grassDark);
     const colors = new Float32Array(grassCount * 3);
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
     let i = 0;
     for (let cz = 0; cz < cellsZ && i < grassCount; cz++) {
       for (let cx = 0; cx < cellsX && i < grassCount; cx++) {
-        // Jitter within cell so rows aren't obvious
         const jx = (this.rand() - 0.5) * cellW * 0.75;
         const jz = (this.rand() - 0.5) * cellD * 0.75;
         const x = meadow.minX + cellW * (cx + 0.5) + jx;
         const z = meadow.minZ + cellD * (cz + 0.5) + jz;
-        const s = 0.85 + this.rand() * 0.45;
-        const sy = s * (0.9 + this.rand() * 0.6);
+        // Skip if inside a reserved zone (spawn, buildings, farm, market)
+        if (this._isReserved(x, z)) {
+          mesh.setMatrixAt(i, zero);
+          i++;
+          continue;
+        }
+        const s = 0.8 + this.rand() * 0.5;
+        const sy = s * (0.85 + this.rand() * 0.55);
         const rot = this.rand() * Math.PI * 2;
         _m.makeRotationY(rot);
         _m.scale(new THREE.Vector3(s, sy, s));
@@ -155,7 +171,7 @@ export class World {
           kind: 'grassInstance',
           hp: 1,
           yield: { key: 'grass', amount: 1 },
-          radius: 0.35,
+          radius: 0.38,
           position: new THREE.Vector3(x, 0, z),
         });
         i++;
@@ -163,6 +179,53 @@ export class World {
     }
     mesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
     mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  // Cluster of three tall thin blade prisms with slightly different heights,
+  // arranged in a triangle. Merged into one geometry so we can still use
+  // InstancedMesh for draw-call efficiency.
+  _makeGrassTuftGeometry() {
+    const blade = (h) => {
+      const g = new THREE.BoxGeometry(0.12, h, 0.06);
+      g.translate(0, h / 2, 0);
+      return g;
+    };
+    const b1 = blade(0.9);
+    const b2 = blade(0.75);
+    b2.translate(0.18, 0, -0.1);
+    const b3 = blade(0.65);
+    b3.translate(-0.15, 0, 0.12);
+    // Merge via BufferGeometryUtils-style manual concat
+    const geos = [b1, b2, b3];
+    const totalCount = geos.reduce((sum, g) => sum + g.attributes.position.count, 0);
+    const pos = new Float32Array(totalCount * 3);
+    const norm = new Float32Array(totalCount * 3);
+    let offset = 0;
+    for (const g of geos) {
+      pos.set(g.attributes.position.array, offset * 3);
+      norm.set(g.attributes.normal.array, offset * 3);
+      offset += g.attributes.position.count;
+    }
+    // Build an index array that concatenates each box's index offset
+    const indexArrays = [];
+    let vertexBase = 0;
+    for (const g of geos) {
+      const arr = g.index.array;
+      const shifted = new (arr.constructor)(arr.length);
+      for (let i = 0; i < arr.length; i++) shifted[i] = arr[i] + vertexBase;
+      indexArrays.push(shifted);
+      vertexBase += g.attributes.position.count;
+    }
+    const totalIndex = indexArrays.reduce((s, a) => s + a.length, 0);
+    const index = new Uint16Array(totalIndex);
+    let io = 0;
+    for (const arr of indexArrays) { index.set(arr, io); io += arr.length; }
+    const merged = new THREE.BufferGeometry();
+    merged.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    merged.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
+    merged.setIndex(new THREE.BufferAttribute(index, 1));
+    for (const g of geos) g.dispose();
+    return merged;
   }
 
   _buildForest() {
@@ -180,29 +243,69 @@ export class World {
     const width = forest.maxX - forest.minX;
     const depth = forest.maxZ - forest.minZ;
 
+    // Trees use three InstancedMeshes (trunk, main leaves, accent leaves) —
+    // that turns ~1000 per-tree draw calls into 3, which is a massive perf
+    // win on mobile GPUs. Harvest hides an instance by zeroing its matrix.
+    const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
+    const leavesInst = new THREE.InstancedMesh(leavesGeo, leavesA, treeCount);
+    const leaves2Inst = new THREE.InstancedMesh(leavesGeo, leavesB, treeCount);
+    trunkInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    leavesInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    leaves2Inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.scene.add(trunkInst, leavesInst, leaves2Inst);
+    this.treeInstMeshes = [trunkInst, leavesInst, leaves2Inst];
+
+    const m4 = new THREE.Matrix4();
+    const mRot = new THREE.Matrix4();
+    const mScale = new THREE.Matrix4();
+    const mPos = new THREE.Matrix4();
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    let placed = 0;
     for (let i = 0; i < treeCount; i++) {
       const x = forest.minX + this.rand() * width;
       const z = forest.minZ + this.rand() * depth;
-      const group = new THREE.Group();
-      const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-      const leaves = new THREE.Mesh(leavesGeo, this.rand() < 0.5 ? leavesA : leavesB);
-      const s = 0.9 + this.rand() * 0.5;
-      leaves.scale.setScalar(s);
-      leaves.position.y += (s - 1) * 0.4;
-      group.add(trunk, leaves);
-      group.position.set(x, 0, z);
-      group.rotation.y = this.rand() * Math.PI * 2;
-      this.scene.add(group);
+      if (this._isReserved(x, z)) {
+        trunkInst.setMatrixAt(i, zero);
+        leavesInst.setMatrixAt(i, zero);
+        leaves2Inst.setMatrixAt(i, zero);
+        continue;
+      }
+      const s = 1.0 + this.rand() * 0.45;
+      const rotY = this.rand() * Math.PI * 2;
+      // Trunk
+      mRot.makeRotationY(rotY);
+      mPos.makeTranslation(x, 0, z);
+      m4.multiplyMatrices(mPos, mRot);
+      trunkInst.setMatrixAt(i, m4);
+      // Main leaves: scaled + raised
+      mScale.makeScale(s, s, s);
+      mPos.makeTranslation(x, (s - 1) * 0.4, z);
+      m4.multiplyMatrices(mPos, mRot).multiply(mScale);
+      leavesInst.setMatrixAt(i, m4);
+      // Accent puff: smaller, slightly offset
+      const ox = (this.rand() - 0.5) * 0.5;
+      const oz = (this.rand() - 0.5) * 0.5;
+      const s2 = s * 0.75;
+      mScale.makeScale(s2, s2, s2);
+      mPos.makeTranslation(x + ox, (s - 1) * 0.4 + 0.4, z + oz);
+      m4.multiplyMatrices(mPos, mRot).multiply(mScale);
+      leaves2Inst.setMatrixAt(i, m4);
+
       this.harvestables.push({
-        kind: 'treeGroup',
-        mesh: group,
+        kind: 'treeInstance',
+        instanceId: i,
         type: 'tree',
         hp: 3,
         yield: { key: 'wood', amount: 2 },
         radius: 0.9,
-        position: group.position.clone(),
+        position: new THREE.Vector3(x, 0, z),
       });
+      placed++;
     }
+    trunkInst.instanceMatrix.needsUpdate = true;
+    leavesInst.instanceMatrix.needsUpdate = true;
+    leaves2Inst.instanceMatrix.needsUpdate = true;
+    void placed;
 
     // Scatter a few accent bushes for warmth between trees
     const bushGeo = new THREE.SphereGeometry(0.6, 6, 5);
@@ -218,29 +321,31 @@ export class World {
   }
 
   _buildPerimeter() {
+    // Perimeter posts as a single InstancedMesh — was ~100 draw calls, now 1.
     const size = CONFIG.world.size;
-    const postGeo = new THREE.BoxGeometry(0.25, 1.2, 0.25);
-    const postMat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
     const half = size / 2 - 0.5;
     const spacing = 2.5;
+    const positions = [];
     for (let x = -half; x <= half; x += spacing) {
-      for (const z of [-half, half]) {
-        const post = new THREE.Mesh(postGeo, postMat);
-        post.position.set(x, 0.6, z);
-        this.scene.add(post);
-      }
+      for (const z of [-half, half]) positions.push([x, z]);
     }
     for (let z = -half; z <= half; z += spacing) {
-      for (const x of [-half, half]) {
-        const post = new THREE.Mesh(postGeo, postMat);
-        post.position.set(x, 0.6, z);
-        this.scene.add(post);
-      }
+      for (const x of [-half, half]) positions.push([x, z]);
     }
+    const postGeo = new THREE.BoxGeometry(0.25, 1.2, 0.25);
+    const postMat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
+    const mesh = new THREE.InstancedMesh(postGeo, postMat, positions.length);
+    const m4 = new THREE.Matrix4();
+    for (let i = 0; i < positions.length; i++) {
+      m4.makeTranslation(positions[i][0], 0.6, positions[i][1]);
+      mesh.setMatrixAt(i, m4);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(mesh);
   }
 
-  update(dt, _elapsed) {
-    if (this.passiveDecal) this.passiveDecal.update(dt);
+  update(_dt, _elapsed) {
+    // Ambient tick placeholder
   }
 
   queryInSlashArc(originVec3, forwardVec3, reach, arcDeg) {
@@ -266,9 +371,13 @@ export class World {
     if (h.kind === 'grassInstance') {
       this.grassInstanceMesh.setMatrixAt(h.instanceId, _zero);
       this.grassInstanceMesh.instanceMatrix.needsUpdate = true;
-    } else if (h.kind === 'treeGroup') {
-      this.scene.remove(h.mesh);
-      h.mesh.traverse?.((c) => { if (c.geometry) c.geometry.dispose?.(); });
+    } else if (h.kind === 'treeInstance') {
+      for (const inst of this.treeInstMeshes) {
+        inst.setMatrixAt(h.instanceId, _zero);
+        inst.instanceMatrix.needsUpdate = true;
+      }
+    } else if (h.kind === 'cropCell' && h.farm) {
+      h.farm.onHarvestableRemoved(h);
     }
   }
 }

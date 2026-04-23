@@ -63,10 +63,13 @@ export class ZoneDecal {
       map: texture,
       transparent: true,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     });
     this.mesh = new THREE.Mesh(geo, mat);
-    this.mesh.position.y = 0.05;
-    this.mesh.renderOrder = 1;
+    this.mesh.position.y = 0.06;
+    this.mesh.renderOrder = 2;
 
     this._texture = texture;
     this._mat = mat;

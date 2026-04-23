@@ -4,20 +4,20 @@ export const CONFIG = {
   world: {
     size: 80,
     // Biome zones (axis-aligned rectangles on XZ plane).
-    // Biomes north of the spawn; market/build plots sit south
-    meadow: { minX: -36, maxX: -4, minZ: -34, maxZ: -8 },
-    forest: { minX: 4, maxX: 36, minZ: -34, maxZ: -8 },
+    // Biomes fill the top half of the map so grass & trees read as dense
+    // carpets/forests. Paths are revealed naturally as the player harvests.
+    meadow: { minX: -38, maxX: -2, minZ: -38, maxZ: 0 },
+    forest: { minX: 2, maxX: 38, minZ: -38, maxZ: 0 },
     grassCount: 1200,
-    treeCount: 160,
-    // Player spawns south-center; market sits behind them to the south.
-    // Build area (hay baler, saw mill, fence) is north of spawn. Meadow and
-    // forest fill the north half of the map.
-    spawnPos: { x: 0, z: 20 },
+    treeCount: 200,
+    // Spawn close to the store — market is pre-built on spawn so the farmer
+    // always has a place to sell. Build plots are just north of spawn.
+    spawnPos: { x: 0, z: 14 },
     buildPlots: {
-      market:   { x: 0, z: 32 },    // south of spawn (behind player)
-      hayBaler: { x: 0, z: 4 },     // north of spawn, center
-      sawMill:  { x: -14, z: 4 },
-      fence:    { x: 14, z: 4 },
+      market:   { x: 0, z: 22 },    // just south of spawn; pre-built
+      hayBaler: { x: 0, z: 2 },     // center of build row
+      sawMill:  { x: -12, z: 2 },
+      fence:    { x: 12, z: 2 },
     },
   },
   player: {
@@ -54,9 +54,10 @@ export const CONFIG = {
       id: 'market',
       name: 'Farmers Market',
       icon: '🏪',
-      require: { bale: 4, wood: 4 },
-      reward: { coin: 60 },
-      blurb: 'Sells bundles for coins',
+      prebuilt: true,              // no construction phase
+      require: {},
+      reward: { coin: 0 },
+      blurb: 'Sells goods to customers',
     },
     sawMill: {
       id: 'sawMill',
@@ -82,57 +83,110 @@ export const CONFIG = {
       consumeFrom: 'grass',
       consumePerCycle: 1,
       intervalSec: 2.5,
-      maxStack: 24,           // plenty of room; pad shows a tall pile
+      maxStack: 10,           // tight visual cap keeps draw calls bounded
     },
     sawMill: {
       produces: 'planks',
       consumeFrom: 'wood',
       consumePerCycle: 1,
       intervalSec: 3.0,
-      maxStack: 24,
+      maxStack: 10,
     },
-    // Market consumes bales/planks from Inventory and mints coins into the pile.
+    // Market consumes stocked goods from Inventory and mints coins into the pile.
     market: {
       produces: 'coin',
       intervalSec: 1.8,
-      coinsPerBale: 8,
-      coinsPerPlanks: 12,
+      // Coins per unit sold, by resource key
+      sellRewards: { bale: 8, planks: 12, tomato: 6, potato: 9 },
       maxStackVisual: 120,
-      balesPerCycle: 1,
-      planksPerCycle: 1,
+      // Market sells in this priority order when multiple goods are stocked
+      sellPriority: ['bale', 'planks', 'tomato', 'potato'],
     },
   },
-  // Resources that live in the carry slot (in front of player). All others
-  // live in the backpack (raw harvest).
-  carryResources: ['bale', 'planks'],
+  // Resources that live in the carry slot (in front of player). Others on back.
+  carryResources: ['bale', 'planks', 'tomato', 'potato'],
+  // Crop definitions for the farm plot
+  crops: {
+    tomato: {
+      key: 'tomato', name: 'Tomato', icon: '🍅',
+      leafColor: 0x3e9a3a, fruitColor: 0xe04a3c,
+      height: 0.55,
+      growSec: 4.5,
+    },
+    potato: {
+      key: 'potato', name: 'Potato', icon: '🥔',
+      leafColor: 0x6aa04d, fruitColor: 0xc49a5a,
+      height: 0.4,
+      growSec: 6.0,
+    },
+  },
+  // Farm plot config — replaces old passive harvest
+  farm: {
+    center: { x: -22, z: -6 },
+    cols: 5,
+    rows: 3,
+    spacing: 1.35,
+    unlockAtBalerLevel: 2,
+    reseedDelayMs: 700,
+    harvestYield: 1,
+  },
+  // Building upgrades — item-cost deposits to raise a building's level.
+  // Higher levels speed up production and increase output cap.
+  // Market is NOT upgradeable (pre-built storefront).
+  buildingLevels: {
+    hayBaler: [
+      { level: 2, require: { grass: 12, wood: 10 }, intervalMul: 0.7, stackMul: 1.0 },
+      { level: 3, require: { grass: 25, planks: 8 }, intervalMul: 0.5, stackMul: 1.0 },
+    ],
+    sawMill: [
+      { level: 2, require: { wood: 12, grass: 10 }, intervalMul: 0.7, stackMul: 1.0 },
+      { level: 3, require: { wood: 25, bale: 8 },   intervalMul: 0.5, stackMul: 1.0 },
+    ],
+  },
+  // Upgrade tile sits south-west of the building, hire tile south-east.
+  // These are in front of the building (south) so they don't overlap the
+  // building body or the output pad on the east side.
+  buildingUpgradeOffset: { x: -2.8, z: 3.6 },
+  // Which resources each completed building accepts at its DROP tile.
+  // Market is special: it accepts crafted items delivered at the SELL tile.
+  buildingInputs: {
+    hayBaler: ['grass'],
+    sawMill: ['wood'],
+    market: ['bale', 'planks', 'tomato', 'potato'],
+  },
+  // Per-building hire tile config — unlocked at Level 2. Hiring spawns a
+  // worker that picks up produced items and delivers them to the market.
+  buildingWorker: {
+    offset: { x: 2.8, z: 3.6 },
+    hireCost: 150,
+    moveSpeed: 4.0,
+    carryCap: 4,
+  },
   // Upgrades purchased at in-world tiles. Each level multiplies next cost.
   upgradeSteps: {
     capacity:    { stat: 'capacity',    amount: 5,   baseCost: 40,  costGrowth: 1.6, icon: '🎒', label: 'Bag' },
     speed:       { stat: 'speed',       amount: 0.8, baseCost: 60,  costGrowth: 1.6, icon: '👟', label: 'Speed' },
     slashRadius: { stat: 'slashRadius', amount: 0.25, baseCost: 80, costGrowth: 1.7, icon: '⚔️', label: 'Slash' },
   },
-  // Upgrade tile plot positions — a row between the store and the build area
+  // Upgrade tile plot positions — row between spawn and build area.
+  // Capacity upgrade removed since the backpack is uncapped.
   upgradePlots: [
-    { key: 'capacity',    x: -7, z: 15 },
-    { key: 'speed',       x:  0, z: 15 },
-    { key: 'slashRadius', x:  7, z: 15 },
+    { key: 'speed',       x: -4, z: 8 },
+    { key: 'slashRadius', x:  4, z: 8 },
   ],
-  // Cosmetic customer NPCs at the market (queue forms south-east of store)
+  // Cosmetic customer NPCs at the market — forms to the east of the stall.
   customers: {
-    queueStart: { x: 4.5, z: 34 },
+    queueStart: { x: 4.0, z: 24 },
     queueDir:   { x: 1, z: 0 },
     spacing: 1.2,
-    maxQueue: 5,
-    spawnIntervalSec: 3.5,
+    maxQueue: 3,
+    spawnIntervalSec: 4.0,
     leaveAfterSec: 2.0,
     colors: [0x3a7dd6, 0xd4493c, 0x8a5ed1, 0xd4a53a, 0x3e9d6e, 0xd07878, 0x58b0c9],
   },
-  // Passive harvest zone sits inside the meadow
+  // Passive harvest parameters (applies inside any farm plot)
   passiveHarvest: {
-    center: { x: -20, z: -2 },
-    radiusX: 6,
-    radiusZ: 5,
-    intervalSec: 0.3,
+    intervalSec: 0.35,
     reach: 3.5,
   },
   // Helper NPCs that replicate player loop
@@ -144,22 +198,25 @@ export const CONFIG = {
     capacity: 10,
   },
   colors: {
-    ground: 0x62a042,
-    groundEdge: 0x4a7f33,
-    meadow: 0x7dc24e,       // brighter green tile for meadow
-    forestFloor: 0x4f7a36,  // darker underbrush
-    grass: 0x7fd35a,
-    grassDark: 0x5ea838,
-    treeTrunk: 0x6b4423,
-    treeLeaves: 0x3f9a3a,
-    treeLeavesDark: 0x2e7a2a,
+    // Highly saturated, cartoon-bright palette
+    ground: 0x8dd858,
+    groundEdge: 0x5ea83a,
+    meadow: 0x9fe864,
+    forestFloor: 0x4aa33a,
+    grass: 0x7be053,
+    grassDark: 0x55b832,
+    treeTrunk: 0x8a5a3a,
+    treeLeaves: 0x55c64a,
+    treeLeavesDark: 0x3ea23a,
     player: 0xffcf87,
-    playerShirt: 0x3a7dd6,
-    playerPants: 0x333a55,
-    backpack: 0x8b5a2b,
+    playerShirt: 0x4292e8,
+    playerPants: 0x3a4063,
+    backpack: 0x9b6833,
     slash: 0xffffff,
-    arrow: 0xffd34e,
-    buildFrame: 0xc09050,
-    buildSiteDirt: 0x7d5a3a,
+    arrow: 0xffdb47,
+    buildFrame: 0xd9ad62,
+    buildSiteDirt: 0x9a6a3a,
+    path: 0xc69a6b,
+    pathEdge: 0x9a6e40,
   },
 };

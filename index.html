@@ -30,6 +30,12 @@
           <div class="resource-pill" data-key="planks">
             <span class="icon">🪚</span><span class="count" data-count="planks">0</span>
           </div>
+          <div class="resource-pill" data-key="tomato">
+            <span class="icon">🍅</span><span class="count" data-count="tomato">0</span>
+          </div>
+          <div class="resource-pill" data-key="potato">
+            <span class="icon">🥔</span><span class="count" data-count="potato">0</span>
+          </div>
           <div class="resource-pill" data-key="coin">
             <span class="icon">🪙</span><span class="count" data-count="coin">0</span>
           </div>
@@ -37,12 +43,20 @@
         <div class="hud-center"></div>
         <div class="hud-bottom">
           <div id="hud-side">
-            <button id="hire-btn" class="hud-btn">👨‍🌾 Hire <span id="hire-cost">150</span>🪙</button>
+            <button id="hire-btn" class="hud-btn" data-ui>👨‍🌾 Hire <span id="hire-cost">150</span>🪙</button>
           </div>
-          <div id="joystick-zone"></div>
         </div>
       </div>
       <div id="toast"></div>
+      <div id="fps-meter">FPS --</div>
+      <!-- Seed choice modal — appears when player enters empty farm plot -->
+      <div id="seed-modal" class="seed-modal">
+        <div class="seed-title">Pick a crop</div>
+        <div class="seed-buttons">
+          <button class="seed-btn" data-crop="tomato">🍅<span>Tomato</span></button>
+          <button class="seed-btn" data-crop="potato">🥔<span>Potato</span></button>
+        </div>
+      </div>
       <!-- World-space DOM overlay (position updated per frame from main.js) -->
       <div id="world-overlay">
         <div id="build-panel" class="build-panel">

@@ -30,6 +30,9 @@
           <div class="resource-pill" data-key="potato">
             <span class="icon">🥔</span><span class="count" data-count="potato">0</span>
           </div>
+          <div class="resource-pill" data-key="corn">
+            <span class="icon">🌽</span><span class="count" data-count="corn">0</span>
+          </div>
           <div class="resource-pill" data-key="sauce">
             <span class="icon">🍶</span><span class="count" data-count="sauce">0</span>
           </div>
@@ -38,6 +41,9 @@
           </div>
           <div class="resource-pill" data-key="egg">
             <span class="icon">🥚</span><span class="count" data-count="egg">0</span>
+          </div>
+          <div class="resource-pill" data-key="milk">
+            <span class="icon">🥛</span><span class="count" data-count="milk">0</span>
           </div>
           <div class="resource-pill" data-key="coin">
             <span class="icon">🪙</span><span class="count" data-count="coin">0</span>
@@ -52,12 +58,22 @@
       </div>
       <div id="toast"></div>
       <div id="fps-meter">FPS --</div>
+      <div id="level-banner" class="level-banner">
+        <div class="banner-inner">
+          <div class="banner-badge"><span class="banner-icon"></span></div>
+          <div class="banner-text">
+            <div class="banner-tier"></div>
+            <div class="banner-name"></div>
+          </div>
+        </div>
+      </div>
       <!-- Seed choice modal — appears when player enters empty farm plot -->
       <div id="seed-modal" class="seed-modal">
         <div class="seed-title">Pick a crop</div>
         <div class="seed-buttons">
           <button class="seed-btn" data-crop="tomato">🍅<span>Tomato</span></button>
           <button class="seed-btn" data-crop="potato">🥔<span>Potato</span></button>
+          <button class="seed-btn" data-crop="corn">🌽<span>Corn</span></button>
         </div>
       </div>
       <!-- World-space DOM overlay (position updated per frame from main.js) -->

@@ -31,8 +31,10 @@ export class LockedPlot {
       icon: '🔒',
       color: '#ffd24a',
       textColor: 'rgba(255,240,200,0.98)',
-      textSize: 140,
+      textSize: 130,
       dashSpacing: [36, 26],
+      rounded: true,
+      cornerRadius: 0.28,
     });
     this.decal.setPosition(this.position.x, this.position.z);
     this.decal.addTo(scene);

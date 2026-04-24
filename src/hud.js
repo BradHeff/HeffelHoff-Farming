@@ -3,13 +3,13 @@ import { Inventory } from './state.js';
 export const RES_ICONS = {
   grass: '🌿', wood: '🪵', bale: '🌾', planks: '🪚',
   tomato: '🍅', potato: '🥔', sauce: '🍶', chips: '🍟', egg: '🥚',
-  coin: '🪙', meat: '🥩',
+  milk: '🥛', corn: '🌽', coin: '🪙', meat: '🥩',
 };
 
 export function mountHUD() {
   // Only display the store's sellable stock + coins. Raw materials (grass /
   // wood) are silent intermediates consumed by factories.
-  const keys = ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'coin'];
+  const keys = ['bale', 'planks', 'tomato', 'potato', 'corn', 'sauce', 'chips', 'egg', 'milk', 'coin'];
   const els = {};
   for (const k of keys) els[k] = document.querySelector(`[data-count="${k}"]`);
   const renderInventory = () => {
@@ -27,6 +27,23 @@ export function toast(msg) {
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 1400);
+}
+
+// Big level-up celebration banner. Re-triggering within the animation
+// window restarts the animation cleanly instead of queueing up pops.
+let bannerTimer = null;
+export function showLevelBanner({ tier, name, icon = '⭐' }) {
+  const el = document.getElementById('level-banner');
+  if (!el) return;
+  el.querySelector('.banner-icon').textContent = icon;
+  el.querySelector('.banner-tier').textContent = tier;
+  el.querySelector('.banner-name').textContent = name;
+  el.classList.remove('show');
+  // Force reflow so the animation restarts
+  void el.offsetWidth;
+  el.classList.add('show');
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => el.classList.remove('show'), 1850);
 }
 
 // Build progress panel ------------------------------------------------------

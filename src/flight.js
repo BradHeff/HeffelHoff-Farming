@@ -9,10 +9,11 @@ export class FlightManager {
     this.active = [];
   }
 
-  spawn({ geometry, material, startPos, endPos, endFn, durationMs = 520, arcH = 1.6, spin = true, onLand = null, scale = 1 }) {
+  spawn({ geometry, material, startPos, endPos, endFn, durationMs = 520, arcH = 1.6, spin = true, onLand = null, scale = 1, delayMs = 0 }) {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.copy(startPos);
     mesh.scale.setScalar(scale);
+    mesh.visible = delayMs <= 0;
     this.scene.add(mesh);
     this.active.push({
       mesh,
@@ -24,12 +25,18 @@ export class FlightManager {
       arcH,
       spin: spin ? (Math.random() - 0.5) * 10 : 0,
       onLand,
+      delay: delayMs / 1000,
     });
   }
 
   update(dt) {
     for (let i = this.active.length - 1; i >= 0; i--) {
       const p = this.active[i];
+      if (p.delay > 0) {
+        p.delay -= dt;
+        continue;
+      }
+      if (!p.mesh.visible) p.mesh.visible = true;
       p.t += dt / p.duration;
       const end = p.endFn ? p.endFn() : p.endPos;
       const t = Math.min(p.t, 1);

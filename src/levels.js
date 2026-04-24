@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { Inventory } from './state.js';
+import { Inventory, HelperStats } from './state.js';
 import { ZoneDecal } from './zone.js';
+import { showLevelBanner } from './hud.js';
 
 // Per-building upgrade tile. Appears next to a building once the build is
 // complete. Requires items (drawn from Inventory) to raise the building's
@@ -29,10 +30,10 @@ export class BuildingLevelTile {
 
   _buildDecal() {
     this.decal = new ZoneDecal({
-      width: 1.7, depth: 1.5,
-      label: 'UP', icon: '',
+      width: 2.0, depth: 1.7,
+      label: 'UP', icon: '⬆️',
       color: '#ffb347', textColor: 'rgba(255,230,180,0.95)',
-      textSize: 140,
+      textSize: 120,
     });
     this.decal.setPosition(this.position.x, this.position.z);
     this.decal.addTo(this.scene);
@@ -189,10 +190,10 @@ export class BuildingHireTile {
 
   _buildDecal() {
     this.decal = new ZoneDecal({
-      width: 1.7, depth: 1.5,
-      label: 'HIRE', icon: '',
+      width: 2.2, depth: 1.7,
+      label: 'HIRE', icon: '👷',
       color: '#d1b7ff', textColor: 'rgba(250,240,255,0.95)',
-      textSize: 120,
+      textSize: 110,
     });
     this.decal.setPosition(this.position.x, this.position.z);
     this.decal.addTo(this.scene);
@@ -360,7 +361,7 @@ export class BuildingHireManager {
     this.onHireFn = onHireFn;
     for (const k of Object.keys(buildManager.sites)) {
       if (!CONFIG.buildingWorker) continue;
-      if (k === 'market' || k === 'fence') continue; // market doesn't need a worker; fence is defensive
+      if (k === 'market') continue; // market doesn't need a worker
       this.tiles[k] = new BuildingHireTile(scene, camera, k, buildManager.sites[k]);
     }
   }
@@ -400,10 +401,10 @@ export class FarmHireTile {
 
   _buildDecal() {
     this.decal = new ZoneDecal({
-      width: 2.0, depth: 1.8,
+      width: 2.4, depth: 1.9,
       label: 'HIRE', icon: '👩‍🌾',
       color: '#b7ff94', textColor: 'rgba(240,255,230,0.98)',
-      textSize: 110,
+      textSize: 100,
     });
     this.decal.setPosition(this.position.x, this.position.z);
     this.decal.addTo(this.scene);
@@ -482,5 +483,105 @@ export class FarmHireManager {
       if (t.active !== shouldShow) t.setActive(shouldShow);
       t.update(dt, player, this.onHireFn);
     }
+  }
+}
+
+// Helper training tile — appears only after full build + expansion. Each
+// purchase advances HelperStats to the next tier, boosting every hired NPC.
+export class HelperTrainingTile {
+  constructor(scene, camera, buildManager, expansionTile) {
+    this.scene = scene;
+    this.camera = camera;
+    this.buildManager = buildManager;
+    this.expansionTile = expansionTile;
+    this.cfg = CONFIG.helperTraining;
+    this.position = new THREE.Vector3(this.cfg.tilePos.x, 0, this.cfg.tilePos.z);
+    this.radius = 1.8;
+    this.active = false;
+    this.decal = new ZoneDecal({
+      width: 2.6, depth: 2.0,
+      label: 'TRAIN', icon: '🎓',
+      color: '#ffd24a', textColor: 'rgba(255,240,200,0.98)',
+      textSize: 130,
+      rounded: true, cornerRadius: 0.3,
+    });
+    this.decal.setPosition(this.position.x, this.position.z);
+    this.decal.addTo(this.scene);
+    this.decal.mesh.visible = false;
+    const el = document.createElement('div');
+    el.className = 'level-card';
+    el.style.display = 'none';
+    document.getElementById('world-overlay').appendChild(el);
+    this.card = el;
+    this._projVec = new THREE.Vector3();
+  }
+
+  _prereqMet() {
+    if (!this.expansionTile?.activated) return false;
+    for (const k of this.cfg.requiredBuilds) {
+      const s = this.buildManager.sites[k];
+      if (!s || !s.completed) return false;
+    }
+    return true;
+  }
+
+  _nextTier() {
+    return this.cfg.tiers.find((t) => t.level === HelperStats.level + 1) || null;
+  }
+
+  setActive(v) {
+    this.active = v;
+    this.decal.mesh.visible = v && !!this._nextTier();
+  }
+
+  update(dt, player) {
+    const shouldShow = this._prereqMet() && !!this._nextTier();
+    if (shouldShow !== this.active) this.setActive(shouldShow);
+    if (!this.active) {
+      this.card.style.display = 'none';
+      return;
+    }
+    this.decal.update(dt);
+    const tier = this._nextTier();
+    if (!tier) return;
+
+    const dx = player.group.position.x - this.position.x;
+    const dz = player.group.position.z - this.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < this.radius && Inventory.coin >= tier.cost) {
+      Inventory.coin -= tier.cost;
+      Inventory.emit();
+      HelperStats.applyTier(tier);
+      showLevelBanner({
+        tier: `HELPERS LV ${tier.level}`,
+        name: `+${Math.round((tier.capMul - 1) * 100)}% CARRY · +${Math.round((tier.speedMul - 1) * 100)}% SPEED`,
+        icon: '🎓',
+      });
+      return;
+    }
+
+    const near = dist < 6;
+    this.card.style.display = near ? 'block' : 'none';
+    if (!near) return;
+
+    const sig = `${HelperStats.level}→${tier.level}|${tier.cost}|${Inventory.coin >= tier.cost}`;
+    if (sig !== this._lastCardSig) {
+      this._lastCardSig = sig;
+      const canPay = Inventory.coin >= tier.cost;
+      this.card.innerHTML = `
+        <div class="title">🎓 Train Helpers L${HelperStats.level} → ${tier.level}</div>
+        <div class="lvl-row">
+          <span class="${canPay ? 'done' : 'missing'}">🪙 ${tier.cost}</span>
+          <span class="done">🎒 ×${tier.capMul.toFixed(1)}</span>
+          <span class="done">👟 ×${tier.speedMul.toFixed(1)}</span>
+        </div>
+      `;
+    }
+    this._projVec.set(this.position.x, 2.0, this.position.z);
+    const v = this._projVec.project(this.camera);
+    const sx = (v.x * 0.5 + 0.5) * window.innerWidth;
+    const sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
+    this.card.style.transform = `translate(calc(-50% + ${sx}px), calc(-100% + ${sy}px))`;
+    this.card.style.opacity = (v.z > 0 && v.z < 1) ? '1' : '0';
   }
 }

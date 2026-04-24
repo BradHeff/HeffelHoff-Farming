@@ -89,6 +89,19 @@ export class CoinPile {
     this._arrow = arrow;
 
     this._t = 0;
+    this._splashed = false;
+
+    // Pool of small coin meshes used for the splash-to-player flight anim.
+    this._flyPool = [];
+    this._flyActive = [];
+    const flyGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.07, 10);
+    const flyMat = new THREE.MeshLambertMaterial({ color: 0xffd04a });
+    for (let i = 0; i < 20; i++) {
+      const m = new THREE.Mesh(flyGeo, flyMat);
+      m.visible = false;
+      scene.add(m);
+      this._flyPool.push(m);
+    }
   }
 
   get capacity() { return this.total; }
@@ -128,28 +141,87 @@ export class CoinPile {
       // Hide arrow when there are no coins to collect
       this._arrow.visible = this.pending > 0;
     }
-    if (this.pending <= 0) return;
+
+    // Tick any in-flight coin meshes (splash flies)
+    this._tickFlights(dt, player);
+
+    if (this.pending <= 0) {
+      this._splashed = false;
+      return;
+    }
     const dx = player.group.position.x - this.origin.x;
     const dz = player.group.position.z - this.origin.z;
     const d2 = dx * dx + dz * dz;
-    if (d2 > this.pickupRadius * this.pickupRadius) return;
-    this._drainAcc = (this._drainAcc || 0) + dt;
-    const rate = 0.035;
-    while (this._drainAcc >= rate && this.pending > 0) {
-      this._drainAcc -= rate;
-      this.pending -= 1;
-      Inventory.add('coin', 1);
+    if (d2 > this.pickupRadius * this.pickupRadius) {
+      this._splashed = false;
+      return;
     }
-    this._floatAcc = (this._floatAcc || 0) + dt;
-    if (this._floatAcc >= 0.25 && floaters) {
-      this._floatAcc = 0;
+    // One-shot splash on enter: dump all pending into Inventory, then
+    // animate up to ~18 coin meshes flying from the tray into the player.
+    if (this._splashed) return;
+    this._splashed = true;
+    this._splashCollect(player, floaters, RES_ICONS);
+  }
+
+  _splashCollect(player, floaters, RES_ICONS) {
+    const total = this.pending;
+    if (total <= 0) return;
+    Inventory.add('coin', total);
+    this.pending = 0;
+
+    const flights = Math.min(total, this._flyPool.length);
+    for (let i = 0; i < flights; i++) {
+      const m = this._flyPool.pop();
+      if (!m) break;
+      const slot = this.slots[Math.min(i, this.slots.length - 1)];
+      const wp = this.group.localToWorld(new THREE.Vector3(slot.x, slot.y + 0.2, slot.z));
+      m.position.copy(wp);
+      m.visible = true;
+      this._flyActive.push({
+        mesh: m,
+        t: 0,
+        ttl: 0.42 + Math.random() * 0.12,
+        start: wp.clone(),
+        // Stagger starts so they form a trail, not a single pop
+        delay: i * 0.03,
+        spin: (Math.random() - 0.5) * 18,
+        player,
+      });
+    }
+    if (floaters) {
       floaters.spawn(
-        { x: this.origin.x + (Math.random() - 0.5) * 1.0, y: 1.3, z: this.origin.z + (Math.random() - 0.5) * 0.8 },
-        `+ ${RES_ICONS?.coin || '🪙'}`,
-        { cls: 'gain', ttl: 0.55, vy: 2.4 }
+        { x: this.origin.x, y: 2.0, z: this.origin.z },
+        `+${total} ${RES_ICONS?.coin || '🪙'}`,
+        { cls: 'gain', ttl: 1.1, vy: 2.2 }
       );
     }
     this._refresh();
+  }
+
+  _tickFlights(dt, player) {
+    if (this._flyActive.length === 0) return;
+    for (let i = this._flyActive.length - 1; i >= 0; i--) {
+      const f = this._flyActive[i];
+      if (f.delay > 0) { f.delay -= dt; continue; }
+      f.t += dt;
+      const k = Math.min(1, f.t / f.ttl);
+      // Player's current coin tower anchor
+      const targ = player.group.position;
+      const tx = targ.x, ty = 2.3, tz = targ.z;
+      const sx = f.start.x, sy = f.start.y, sz = f.start.z;
+      // Parabolic lerp with extra rise
+      const arc = Math.sin(k * Math.PI) * 0.8;
+      f.mesh.position.x = sx + (tx - sx) * k;
+      f.mesh.position.y = sy + (ty - sy) * k + arc;
+      f.mesh.position.z = sz + (tz - sz) * k;
+      f.mesh.rotation.y += f.spin * dt;
+      f.mesh.rotation.x += f.spin * 0.6 * dt;
+      if (k >= 1) {
+        f.mesh.visible = false;
+        this._flyPool.push(f.mesh);
+        this._flyActive.splice(i, 1);
+      }
+    }
   }
 }
 

@@ -3,6 +3,10 @@
 export const CONFIG = {
   world: {
     size: 80,
+    // Hard rectangular bounds for the playable map. Ground + perimeter fence
+    // are drawn to this rectangle. Southern edge is right past the customer
+    // queue ("the road") so nothing renders behind the player.
+    bounds: { minX: -32, maxX: 32, minZ: -40, maxZ: 18 },
     // Biome zones (axis-aligned rectangles on XZ plane). Smaller strips than
     // before so the interactive area is compact and everything stays within a
     // few steps of the player.
@@ -21,7 +25,7 @@ export const CONFIG = {
       market:      { x: 0, z: 13 },    // just south of spawn; pre-built
       hayBaler:    { x: 0, z: 1 },     // center of build row
       sawMill:     { x: -8, z: 1 },
-      fence:       { x: 8, z: 1 },
+      dairyFarm:   { x: 8, z: 1 },     // right of baler — milking station w/ cow
       sauceFactory:{ x: -16, z: 4 },   // left flank — unlocks after tomato chosen
       chipsFactory:{ x:  16, z: 4 },   // right flank — unlocks after potato chosen
       eggFarm:     { x: 0, z: -28 },   // deep in expansion zone (locked)
@@ -74,13 +78,13 @@ export const CONFIG = {
       reward: { coin: 40 },
       blurb: 'Cuts planks for building',
     },
-    fence: {
-      id: 'fence',
-      name: 'Fence Ring',
-      icon: '🛡️',
-      require: { wood: 20 },
-      reward: { coin: 0 },
-      blurb: 'Defensive wall against enemies',
+    dairyFarm: {
+      id: 'dairyFarm',
+      name: 'Dairy Farm',
+      icon: '🐄',
+      require: { wood: 20, grass: 15 },
+      reward: { coin: 30 },
+      blurb: 'Milks cows for fresh dairy',
     },
     sauceFactory: {
       id: 'sauceFactory',
@@ -139,9 +143,16 @@ export const CONFIG = {
     },
     eggFarm: {
       produces: 'egg',
-      consumeFrom: 'grass',        // chickens eat grass
+      consumeFrom: 'corn',         // chickens eat corn (drop-off at DROP tile)
       consumePerCycle: 1,
       intervalSec: 3.5,
+      maxStack: 10,
+    },
+    dairyFarm: {
+      produces: 'milk',
+      consumeFrom: 'bale',         // cow eats hay bales (drop-off at DROP tile)
+      consumePerCycle: 1,
+      intervalSec: 3.2,
       maxStack: 10,
     },
     // Market consumes stocked goods from Inventory and mints coins into the pile.
@@ -149,14 +160,14 @@ export const CONFIG = {
       produces: 'coin',
       intervalSec: 1.8,
       // Coins per unit sold, by resource key
-      sellRewards: { bale: 8, planks: 12, tomato: 6, potato: 9, sauce: 18, chips: 22, egg: 14 },
+      sellRewards: { bale: 8, planks: 12, tomato: 6, potato: 9, sauce: 18, chips: 22, egg: 14, milk: 16 },
       maxStackVisual: 120,
       // Market sells in this priority order when multiple goods are stocked
-      sellPriority: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg'],
+      sellPriority: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'milk'],
     },
   },
   // Resources that live in the carry slot (in front of player). Others on back.
-  carryResources: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg'],
+  carryResources: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'milk', 'corn'],
   // Crop definitions for the farm plot
   crops: {
     tomato: {
@@ -170,6 +181,13 @@ export const CONFIG = {
       leafColor: 0x6aa04d, fruitColor: 0xc49a5a,
       height: 0.4,
       growSec: 6.0,
+    },
+    // Chicken feed — planted on any farm, delivered to the Egg Farm.
+    corn: {
+      key: 'corn', name: 'Corn', icon: '🌽',
+      leafColor: 0x5caa38, fruitColor: 0xf2c648,
+      height: 0.9,
+      growSec: 5.5,
     },
   },
   // Farm plot config — replaces old passive harvest
@@ -189,6 +207,23 @@ export const CONFIG = {
       unlockAtBalerLevel: 2,
       reseedDelayMs: 700,
       harvestYield: 1,
+    },
+    // Expansion-zone farms — locked until the map expansion is activated.
+    {
+      center: { x: -12, z: -24 },
+      cols: 5, rows: 3, spacing: 1.35,
+      unlockAtBalerLevel: 2,
+      reseedDelayMs: 700,
+      harvestYield: 1,
+      requiresExpansion: true,
+    },
+    {
+      center: { x: 12, z: -24 },
+      cols: 5, rows: 3, spacing: 1.35,
+      unlockAtBalerLevel: 2,
+      reseedDelayMs: 700,
+      harvestYield: 1,
+      requiresExpansion: true,
     },
   ],
   // Legacy single-farm reference, kept for any imports that still use it.
@@ -233,8 +268,12 @@ export const CONFIG = {
       { level: 3, require: { potato: 20, planks: 12 }, intervalMul: 0.5, stackMul: 1.0 },
     ],
     eggFarm: [
-      { level: 2, require: { egg: 10, planks: 6 }, intervalMul: 0.7, stackMul: 1.0 },
-      { level: 3, require: { egg: 20, planks: 12 }, intervalMul: 0.5, stackMul: 1.0 },
+      { level: 2, require: { corn: 10, planks: 6 }, intervalMul: 0.7, stackMul: 1.0 },
+      { level: 3, require: { corn: 20, planks: 12 }, intervalMul: 0.5, stackMul: 1.0 },
+    ],
+    dairyFarm: [
+      { level: 2, require: { bale: 10, wood: 8 }, intervalMul: 0.7, stackMul: 1.0 },
+      { level: 3, require: { bale: 20, planks: 12 }, intervalMul: 0.5, stackMul: 1.0 },
     ],
   },
   // Upgrade tile sits south-west of the building (closer row), hire tile
@@ -249,8 +288,9 @@ export const CONFIG = {
     sawMill: ['wood'],
     sauceFactory: ['tomato'],
     chipsFactory: ['potato'],
-    eggFarm: ['grass'],
-    market: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg'],
+    eggFarm: ['corn'],
+    dairyFarm: ['bale'],
+    market: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'milk'],
   },
   // Per-building hire tile config — unlocked at Level 2. Hiring spawns a
   // worker that picks up produced items and delivers them to the market.
@@ -259,6 +299,32 @@ export const CONFIG = {
     hireCost: 150,
     moveSpeed: 4.0,
     carryCap: 4,
+  },
+  // Tractor — end-game unlock. Preview sits on a pulsing ring until all
+  // core buildings are Lv3 AND helper training is Lv2+. Paying the cost
+  // spawns an autonomous tractor that sweeps the farm harvesting everything.
+  tractor: {
+    unlockPos: { x: -8, z: -10 },
+    unlockCost: 800,
+    moveSpeed: 7.5,
+    capacity: 40,
+    harvestRadius: 3.0,
+    harvestIntervalSec: 0.35,
+    perSweepMax: 6,
+    requiredL3: ['hayBaler', 'sawMill', 'dairyFarm', 'sauceFactory', 'chipsFactory', 'eggFarm'],
+  },
+  // Helper training tile — revealed only after every main building is
+  // complete AND the map expansion has been activated. Spending coins at
+  // the tile raises HelperStats.capMul / speedMul globally, boosting all
+  // hired farm + factory workers simultaneously.
+  helperTraining: {
+    tilePos: { x: 0, z: -14 },
+    requiredBuilds: ['hayBaler', 'sawMill', 'dairyFarm', 'sauceFactory', 'chipsFactory', 'eggFarm'],
+    tiers: [
+      { level: 2, cost: 300, capMul: 1.4, speedMul: 1.15 },
+      { level: 3, cost: 800, capMul: 1.8, speedMul: 1.3 },
+      { level: 4, cost: 2000, capMul: 2.4, speedMul: 1.5 },
+    ],
   },
   // Farm worker — hired at the farm's HIRE tile. Walks into the plot,
   // harvests ready crops, delivers to the matching factory (sauce for
@@ -280,8 +346,8 @@ export const CONFIG = {
   // Upgrade tile plot positions — row between spawn and build area.
   // Capacity upgrade removed since the backpack is uncapped.
   upgradePlots: [
-    { key: 'speed',       x: -3.5, z: 6 },
-    { key: 'slashRadius', x:  3.5, z: 6 },
+    { key: 'speed',       x: -5, z: 11 },
+    { key: 'slashRadius', x:  5, z: 11 },
   ],
   // Customer queue — on the SOUTH side of the store (behind, from the
   // player's viewpoint). Market sits at (0, 22), queue at z=25 so customers
@@ -310,25 +376,26 @@ export const CONFIG = {
     capacity: 10,
   },
   colors: {
-    // Highly saturated, cartoon-bright palette
-    ground: 0x8dd858,
-    groundEdge: 0x5ea83a,
-    meadow: 0x9fe864,
-    forestFloor: 0x4aa33a,
-    grass: 0x7be053,
-    grassDark: 0x55b832,
-    treeTrunk: 0x8a5a3a,
-    treeLeaves: 0x55c64a,
-    treeLeavesDark: 0x3ea23a,
-    player: 0xffcf87,
-    playerShirt: 0x4292e8,
-    playerPants: 0x3a4063,
-    backpack: 0x9b6833,
+    // Candy-bright, highly saturated palette — meant to pop against the sky
+    // and read clearly on a phone screen outdoors.
+    ground: 0x7ae54a,
+    groundEdge: 0x4fbd2f,
+    meadow: 0x8dff5a,
+    forestFloor: 0x3ea238,
+    grass: 0x6eff3c,
+    grassDark: 0x3fd920,
+    treeTrunk: 0xa66633,
+    treeLeaves: 0x3fd238,
+    treeLeavesDark: 0x2a9a32,
+    player: 0xffd28a,
+    playerShirt: 0x3ea6ff,
+    playerPants: 0x344272,
+    backpack: 0xb3702e,
     slash: 0xffffff,
-    arrow: 0xffdb47,
-    buildFrame: 0xd9ad62,
-    buildSiteDirt: 0x9a6a3a,
-    path: 0xc69a6b,
-    pathEdge: 0x9a6e40,
+    arrow: 0xffd847,
+    buildFrame: 0xf2c14a,
+    buildSiteDirt: 0xa66a3a,
+    path: 0xd7a06a,
+    pathEdge: 0xa07040,
   },
 };

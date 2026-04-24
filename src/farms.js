@@ -33,6 +33,8 @@ export class Farm {
     this.center = new THREE.Vector3(cfg.center.x, 0, cfg.center.z);
 
     this.unlocked = false;
+    this.requiresExpansion = !!cfg.requiresExpansion;
+    this.expansionUnlocked = !this.requiresExpansion;
     this.cropKey = null;
     // Each cell: { x, z, plant: Group|null, harvestable: ref|null,
     //              growT: seconds_since_seed, growSec: total_grow_time,
@@ -45,51 +47,77 @@ export class Farm {
   }
 
   _buildDecal() {
-    // Show as plowed soil rows — no HARVEST label, no dashed outline.
+    // Raised wooden planter bed: the soil sits inside a box of chunky wooden
+    // walls, ~0.3u above ground so the crops grow "out of the bed" like the
+    // reference screenshots.
     const width = this.cols * this.cfg.spacing + 0.8;
     const depth = this.rows * this.cfg.spacing + 0.6;
     this.bounds = { width, depth };
+    this.soilY = 0.22;
+    this.decalGroup = new THREE.Group();
+    this.scene.add(this.decalGroup);
+    // If this farm is gated behind the expansion unlock, hide the whole bed
+    // until the player activates expansion.
+    this.decalGroup.visible = this.expansionUnlocked;
 
-    // Base soil rectangle
+    // Raised soil surface (thin box so it has visible sides too)
+    const soilMat = new THREE.MeshLambertMaterial({ color: 0x6a4628 });
     const soil = new THREE.Mesh(
-      new THREE.PlaneGeometry(width, depth),
-      new THREE.MeshLambertMaterial({
-        color: 0x5a3a20,
-        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
-      })
+      new THREE.BoxGeometry(width, 0.2, depth),
+      soilMat
     );
-    soil.rotation.x = -Math.PI / 2;
-    soil.position.set(this.center.x, 0.02, this.center.z);
-    this.scene.add(soil);
+    soil.position.set(this.center.x, 0.12, this.center.z);
+    this.decalGroup.add(soil);
     this.soilMesh = soil;
 
-    // Darker plow furrows — thin strips across the X axis
-    const furrowMat = new THREE.MeshLambertMaterial({
-      color: 0x3a2612,
-      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-    });
+    // Darker plow furrows on top of the soil
+    const furrowMat = new THREE.MeshLambertMaterial({ color: 0x3a2410 });
     this.furrowGroup = new THREE.Group();
     const furrowCount = this.rows * 2;
-    const furrowGeo = new THREE.PlaneGeometry(width * 0.95, 0.1);
+    const furrowGeo = new THREE.PlaneGeometry(width * 0.92, 0.1);
     furrowGeo.rotateX(-Math.PI / 2);
     for (let i = 0; i < furrowCount; i++) {
       const f = new THREE.Mesh(furrowGeo, furrowMat);
       const t = (i + 0.5) / furrowCount;
-      f.position.set(this.center.x, 0.03, this.center.z - depth / 2 + t * depth);
+      f.position.set(this.center.x, this.soilY + 0.005, this.center.z - depth / 2 + t * depth);
       this.furrowGroup.add(f);
     }
-    this.scene.add(this.furrowGroup);
+    this.decalGroup.add(this.furrowGroup);
 
-    // Wooden rail frame around the plot (simple 4-side border)
-    const railMat = new THREE.MeshLambertMaterial({ color: 0x7a5232 });
-    const hRail = new THREE.Mesh(new THREE.BoxGeometry(width + 0.2, 0.12, 0.12), railMat);
-    const vRail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, depth + 0.2), railMat);
-    const hN = hRail.clone(); hN.position.set(this.center.x, 0.08, this.center.z - depth / 2);
-    const hS = hRail.clone(); hS.position.set(this.center.x, 0.08, this.center.z + depth / 2);
-    const vW = vRail.clone(); vW.position.set(this.center.x - width / 2, 0.08, this.center.z);
-    const vE = vRail.clone(); vE.position.set(this.center.x + width / 2, 0.08, this.center.z);
-    this.scene.add(hN, hS, vW, vE);
+    // Wooden planter walls — thick enough to read as a real box from top-down
+    const plankMat = new THREE.MeshLambertMaterial({ color: 0x8a5a32 });
+    const plankDark = new THREE.MeshLambertMaterial({ color: 0x5a3820 });
+    const wallH = 0.32;
+    const wallT = 0.18;
+    const hRail = new THREE.Mesh(
+      new THREE.BoxGeometry(width + wallT * 2, wallH, wallT),
+      plankMat,
+    );
+    const vRail = new THREE.Mesh(
+      new THREE.BoxGeometry(wallT, wallH, depth + wallT * 2),
+      plankMat,
+    );
+    const y = wallH / 2;
+    const hN = hRail.clone(); hN.position.set(this.center.x, y, this.center.z - depth / 2 - wallT / 2);
+    const hS = hRail.clone(); hS.position.set(this.center.x, y, this.center.z + depth / 2 + wallT / 2);
+    const vW = vRail.clone(); vW.position.set(this.center.x - width / 2 - wallT / 2, y, this.center.z);
+    const vE = vRail.clone(); vE.position.set(this.center.x + width / 2 + wallT / 2, y, this.center.z);
+    this.decalGroup.add(hN, hS, vW, vE);
     this.frame = [hN, hS, vW, vE];
+
+    // Dark corner posts so the box silhouette pops
+    const postGeo = new THREE.BoxGeometry(wallT * 1.2, wallH * 1.15, wallT * 1.2);
+    for (const [cx, cz] of [
+      [-width / 2 - wallT / 2, -depth / 2 - wallT / 2],
+      [ width / 2 + wallT / 2, -depth / 2 - wallT / 2],
+      [-width / 2 - wallT / 2,  depth / 2 + wallT / 2],
+      [ width / 2 + wallT / 2,  depth / 2 + wallT / 2],
+    ]) {
+      const p = new THREE.Mesh(postGeo, plankDark);
+      p.position.set(this.center.x + cx, y + 0.02, this.center.z + cz);
+      this.decalGroup.add(p);
+      this.frame.push(p);
+    }
   }
 
   _buildCells() {
@@ -110,6 +138,10 @@ export class Farm {
   }
 
   setUnlocked(v) { this.unlocked = v; }
+  setExpansionUnlocked(v) {
+    this.expansionUnlocked = !!v;
+    if (this.decalGroup) this.decalGroup.visible = this.expansionUnlocked;
+  }
 
   isInside(pos) {
     const dx = Math.abs(pos.x - this.center.x);
@@ -130,7 +162,7 @@ export class Farm {
     for (const cell of this.cells) {
       if (cell.state !== 'empty') continue;
       cell.plant = this._makePlantMesh(crop);
-      cell.plant.position.set(cell.x, 0, cell.z);
+      cell.plant.position.set(cell.x, this.soilY, cell.z);
       cell.plant.scale.setScalar(0.2);
       this.scene.add(cell.plant);
       cell.growT = 0;
@@ -145,48 +177,81 @@ export class Farm {
   _makePlantMesh(crop) {
     const proto = getPlantProto(crop.key);
     const g = new THREE.Group();
+    // Stem + leaf crown are the STUB — always visible once seeded.
+    const stem = new THREE.Mesh(proto.stemGeo, proto.stemMat);
+    stem.position.y = proto.height / 2;
+    g.add(stem);
     const leaf = new THREE.Mesh(proto.leafGeo, proto.leafMat);
     leaf.position.y = proto.height * 0.6;
     leaf.scale.set(1.1, 0.6, 1.1);
     g.add(leaf);
+    // Fruits — vanish on harvest, pop back on regrow.
+    const fruits = [];
     for (let i = 0; i < 3; i++) {
       const f = new THREE.Mesh(proto.fruitGeo, proto.fruitMat);
       const a = (i / 3) * Math.PI * 2;
       f.position.set(Math.cos(a) * 0.18, proto.height * 0.45, Math.sin(a) * 0.18);
       g.add(f);
+      fruits.push(f);
     }
-    const stem = new THREE.Mesh(proto.stemGeo, proto.stemMat);
-    stem.position.y = proto.height / 2;
-    g.add(stem);
+    g.userData.fruits = fruits;
+    g.userData.stubs = [stem, leaf];
     return g;
   }
 
   onHarvestableRemoved(h) {
     const cell = h.cell;
     if (!cell) return;
-    if (cell.plant) {
-      // Don't dispose geos/mats — they're shared via PLANT_PROTOS.
-      this.scene.remove(cell.plant);
-      cell.plant = null;
+    // Keep the stub (stem + leaves) visible — only hide the fruits and
+    // start the regrow timer. The plot always reads as "planted".
+    if (cell.plant && cell.plant.userData.fruits) {
+      for (const f of cell.plant.userData.fruits) f.visible = false;
     }
     cell.harvestable = null;
-    cell.state = 'empty';
+    // Regrow ~60% of the original grow time — faster than a fresh seed.
+    const crop = CONFIG.crops[cell.cropKey];
+    cell.state = 'regrowing';
     cell.growT = 0;
-    this._reseedTimer = 0;
+    cell.growSec = (crop?.growSec || 4.5) * 0.6;
   }
 
   update(dt, worldHarvestables) {
     if (!this.unlocked) return;
-    // Grow ticking
+    // Grow ticking — both initial 'growing' and post-harvest 'regrowing'
+    // cells progress the fruit in. Initial growth scales the whole plant
+    // up; regrow just pops the fruits back in.
     for (const cell of this.cells) {
-      if (cell.state !== 'growing' || !cell.plant) continue;
-      cell.growT += dt;
-      const t = Math.min(1, cell.growT / cell.growSec);
-      // Ease-out scale so they puff up on finish
-      const s = 0.2 + 0.8 * (1 - Math.pow(1 - t, 2));
-      cell.plant.scale.setScalar(s);
+      if (!cell.plant) continue;
+      if (cell.state === 'growing') {
+        cell.growT += dt;
+        const t = Math.min(1, cell.growT / cell.growSec);
+        const s = 0.2 + 0.8 * (1 - Math.pow(1 - t, 2));
+        cell.plant.scale.setScalar(s);
+      } else if (cell.state === 'regrowing') {
+        cell.growT += dt;
+        const t = Math.min(1, cell.growT / cell.growSec);
+        // Fruits pop in at t>=0.75 so stubs sit bare for most of the cycle
+        const fruits = cell.plant.userData.fruits;
+        if (fruits) {
+          const show = t >= 0.75;
+          const fruitScale = show ? Math.min(1, (t - 0.75) / 0.25 * 1.1) : 0;
+          for (const f of fruits) {
+            f.visible = show;
+            if (show) f.scale.setScalar(fruitScale);
+          }
+        }
+      } else {
+        continue;
+      }
       if (cell.growT >= cell.growSec) {
         cell.state = 'ready';
+        // Reset any fruit scale to 1 on full ripen
+        if (cell.plant.userData.fruits) {
+          for (const f of cell.plant.userData.fruits) {
+            f.visible = true;
+            f.scale.setScalar(1);
+          }
+        }
         const harv = {
           kind: 'cropCell',
           type: cell.cropKey,

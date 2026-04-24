@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { ZoneDecal } from './zone.js';
 import { populateDecorations } from './decorations.js';
+import { buildPaths } from './paths.js';
 
 function mulberry32(seed) {
   return function () {
@@ -23,11 +24,75 @@ export class World {
     this.grassInstanceMesh = null; // InstancedMesh for grass
     this._buildGround();
     this._buildBiomeOverlays();
+    // Dirt paths go on after biome overlays so they render above them.
+    buildPaths(this.scene);
     this._buildGrassCarpet();
     this._buildForest();
     this._buildExpansionBiome(); // initially locked — slash ignores these
+    this._buildExpansionGate();  // physical wall + sign across expansion line
     this._buildPerimeter();
+    this._buildDistantHills();   // dimmed landscape around the map edge
     populateDecorations(this.scene, this.rand);
+  }
+
+  // Build a visible wooden fence line across the expansion boundary. While
+  // expansion is locked, the player can't step past this line. `setLocked`
+  // toggles both the mesh visibility and the collision state.
+  _buildExpansionGate() {
+    const ex = CONFIG.expansion;
+    if (!ex) return;
+    const gateZ = ex.meadowStrip.maxZ; // southern edge of the locked strip
+    this.expansionGateZ = gateZ;
+    this.expansionGateOpen = false;
+
+    const b = CONFIG.world.bounds;
+    const group = new THREE.Group();
+    this.scene.add(group);
+    this.expansionGateGroup = group;
+
+    // Continuous post + 2-rail fence along x from b.minX to b.maxX, with a
+    // small gap in the middle (center on x=0) so the visual has "gates".
+    const postMat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
+    const railMat = new THREE.MeshLambertMaterial({ color: 0xa66633 });
+    const spacing = 1.8;
+    const postGeo = new THREE.CylinderGeometry(0.1, 0.1, 1.4, 8);
+    const railGeo = new THREE.BoxGeometry(spacing, 0.1, 0.1);
+    for (let x = b.minX + 0.5; x <= b.maxX - 0.5; x += spacing) {
+      // Skip a 2-post-wide opening at center so the path visually "gates"
+      if (Math.abs(x) < 1.5) continue;
+      const p = new THREE.Mesh(postGeo, postMat);
+      p.position.set(x, 0.7, gateZ);
+      group.add(p);
+      if (x + spacing > b.maxX - 0.5 || Math.abs(x + spacing) < 1.5) continue;
+      for (const y of [0.5, 1.05]) {
+        const rail = new THREE.Mesh(railGeo, railMat);
+        rail.position.set(x + spacing / 2, y, gateZ);
+        group.add(rail);
+      }
+    }
+
+    // Center warning sign on the gap — dashed stop look
+    const signPost = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 1.8, 8),
+      postMat,
+    );
+    signPost.position.set(0, 0.9, gateZ);
+    group.add(signPost);
+    const signBoard = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 0.6, 0.06),
+      new THREE.MeshLambertMaterial({ color: 0xffcc66 }),
+    );
+    signBoard.position.set(0, 1.6, gateZ);
+    group.add(signBoard);
+    this.expansionGateSign = signBoard;
+  }
+
+  openExpansionGate() {
+    this.expansionGateOpen = true;
+    if (this.expansionGateGroup) {
+      this.scene.remove(this.expansionGateGroup);
+      this.expansionGateGroup = null;
+    }
   }
 
   _buildExpansionBiome() {
@@ -153,6 +218,7 @@ export class World {
       if (h._locked) h._locked = false;
     }
     this._expansionLocked = false;
+    this.openExpansionGate();
   }
 
   // Returns true if the point is inside any reserved clearing (build plots,
@@ -175,7 +241,7 @@ export class World {
       { x: spawn.x,  z: spawn.z,  r: 4 },
       { x: plots.hayBaler.x, z: plots.hayBaler.z, r: 5 },
       { x: plots.sawMill.x,  z: plots.sawMill.z,  r: 5 },
-      { x: plots.fence.x,    z: plots.fence.z,    r: 5 },
+      { x: plots.dairyFarm.x, z: plots.dairyFarm.z, r: 5 },
       { x: plots.market.x,   z: plots.market.z,   r: 6 },
       { x: plots.sauceFactory.x, z: plots.sauceFactory.z, r: 5 },
       { x: plots.chipsFactory.x, z: plots.chipsFactory.z, r: 5 },
@@ -220,11 +286,17 @@ export class World {
   }
 
   _buildGround() {
-    const size = CONFIG.world.size;
-    const geo = new THREE.PlaneGeometry(size, size, 1, 1);
+    const b = CONFIG.world.bounds || {
+      minX: -CONFIG.world.size / 2, maxX: CONFIG.world.size / 2,
+      minZ: -CONFIG.world.size / 2, maxZ: CONFIG.world.size / 2,
+    };
+    const w = b.maxX - b.minX;
+    const d = b.maxZ - b.minZ;
+    const geo = new THREE.PlaneGeometry(w, d, 1, 1);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshLambertMaterial({ color: CONFIG.colors.ground });
     const ground = new THREE.Mesh(geo, mat);
+    ground.position.set((b.minX + b.maxX) / 2, 0, (b.minZ + b.maxZ) / 2);
     ground.receiveShadow = true;
     this.scene.add(ground);
   }
@@ -483,17 +555,68 @@ export class World {
     }
   }
 
+  // Ring of soft conical hills outside the playable rectangle so the map
+  // reads like it continues into unexplored distance instead of ending in a
+  // void. Using instance-free meshes (low count: ~28) so the draw-call hit
+  // is minimal.
+  _buildDistantHills() {
+    const b = CONFIG.world.bounds || {
+      minX: -CONFIG.world.size / 2, maxX: CONFIG.world.size / 2,
+      minZ: -CONFIG.world.size / 2, maxZ: CONFIG.world.size / 2,
+    };
+    const cx = (b.minX + b.maxX) / 2;
+    const cz = (b.minZ + b.maxZ) / 2;
+    const rx = (b.maxX - b.minX) / 2 + 6;
+    const rz = (b.maxZ - b.minZ) / 2 + 6;
+
+    const hillGeo = new THREE.ConeGeometry(3.2, 5.0, 7);
+    const hillMat = new THREE.MeshLambertMaterial({ color: 0x4a8a4a });
+    const hillMat2 = new THREE.MeshLambertMaterial({ color: 0x3a6f3a });
+
+    const spots = 28;
+    for (let i = 0; i < spots; i++) {
+      const a = (i / spots) * Math.PI * 2;
+      // Put the hill on an ellipse slightly outside the bounds rectangle
+      const rr = 1.0 + this.rand() * 0.35;
+      const x = cx + Math.cos(a) * rx * rr;
+      const z = cz + Math.sin(a) * rz * rr;
+      const s = 0.8 + this.rand() * 1.1;
+      const hill = new THREE.Mesh(hillGeo, i % 2 === 0 ? hillMat : hillMat2);
+      hill.position.set(x, s * 2.5 - 1.5, z);
+      hill.scale.set(s, s * (0.8 + this.rand() * 0.5), s);
+      hill.rotation.y = this.rand() * Math.PI * 2;
+      this.scene.add(hill);
+    }
+    // Smaller hillocks dotted further out for a depth-layered look
+    const smallGeo = new THREE.ConeGeometry(2.0, 3.0, 7);
+    for (let i = 0; i < 22; i++) {
+      const a = (i / 22) * Math.PI * 2 + 0.15;
+      const rr = 1.35 + this.rand() * 0.4;
+      const x = cx + Math.cos(a) * rx * rr;
+      const z = cz + Math.sin(a) * rz * rr;
+      const s = 0.6 + this.rand() * 0.8;
+      const h = new THREE.Mesh(smallGeo, hillMat2);
+      h.position.set(x, s * 1.5 - 1.0, z);
+      h.scale.set(s, s * 0.8, s);
+      this.scene.add(h);
+    }
+  }
+
   _buildPerimeter() {
     // Perimeter posts as a single InstancedMesh — was ~100 draw calls, now 1.
-    const size = CONFIG.world.size;
-    const half = size / 2 - 0.5;
+    const b = CONFIG.world.bounds || {
+      minX: -CONFIG.world.size / 2, maxX: CONFIG.world.size / 2,
+      minZ: -CONFIG.world.size / 2, maxZ: CONFIG.world.size / 2,
+    };
     const spacing = 2.5;
     const positions = [];
-    for (let x = -half; x <= half; x += spacing) {
-      for (const z of [-half, half]) positions.push([x, z]);
+    for (let x = b.minX; x <= b.maxX; x += spacing) {
+      positions.push([x, b.minZ]);
+      positions.push([x, b.maxZ]);
     }
-    for (let z = -half; z <= half; z += spacing) {
-      for (const x of [-half, half]) positions.push([x, z]);
+    for (let z = b.minZ + spacing; z < b.maxZ; z += spacing) {
+      positions.push([b.minX, z]);
+      positions.push([b.maxX, z]);
     }
     const postGeo = new THREE.BoxGeometry(0.25, 1.2, 0.25);
     const postMat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });

@@ -32,6 +32,8 @@ export const Inventory = {
   sauce: 0,
   chips: 0,
   egg: 0,
+  milk: 0,
+  corn: 0,
   coin: 0,
   _subs: new Set(),
   subscribe(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
@@ -73,7 +75,7 @@ export const Backpack = {
 // PlayerCarry — crafted/harvested items (bales, planks, crops). Rendered as
 // a stack in FRONT of the player (in their arms). Uncapped.
 export const PlayerCarry = {
-  items: { bale: 0, planks: 0, tomato: 0, potato: 0, sauce: 0, chips: 0, egg: 0 },
+  items: { bale: 0, planks: 0, tomato: 0, potato: 0, sauce: 0, chips: 0, egg: 0, milk: 0, corn: 0 },
   _subs: new Set(),
   subscribe(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
   emit() { this._subs.forEach((fn) => fn(this)); },
@@ -109,3 +111,21 @@ export function dumpAllToInventory() {
 }
 
 PlayerStats.subscribe(() => Backpack.emit());
+
+// HelperStats — end-game multipliers shared across all hired NPCs (farm
+// workers, building workers, helpers). Raised by the Helper Training tile
+// which only appears after full-game prerequisites are met.
+export const HelperStats = {
+  level: 1,
+  capMul: 1.0,   // multiplier on worker carry cap
+  speedMul: 1.0, // multiplier on worker move speed
+  _subs: new Set(),
+  subscribe(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
+  emit() { this._subs.forEach((fn) => fn(this)); },
+  applyTier(tier) {
+    this.level = tier.level;
+    this.capMul = tier.capMul ?? this.capMul;
+    this.speedMul = tier.speedMul ?? this.speedMul;
+    this.emit();
+  },
+};

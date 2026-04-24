@@ -1,22 +1,27 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { Inventory } from './state.js';
+import { Inventory, HelperStats } from './state.js';
 import { RES_ICONS } from './hud.js';
 import { getFaceMaterial } from './faces.js';
 
 // Shared chibi geometry pool — created ONCE at module load. Every spawned
 // NPC reuses these buffers. Materials per-color are cached below.
+// Anime chibi proportions — noticeably bigger head relative to body (~2:1),
+// shorter legs, rounder torso. Reads as "cute cartoon kid" instead of
+// generic human doll.
 const CHIBI_GEOS = {
-  leg: new THREE.CapsuleGeometry(0.13, 0.35, 4, 8),
-  torso: new THREE.CapsuleGeometry(0.26, 0.3, 4, 10),
-  head: new THREE.SphereGeometry(0.26, 16, 12),
+  leg: new THREE.CapsuleGeometry(0.14, 0.28, 4, 8),
+  torso: new THREE.CapsuleGeometry(0.28, 0.28, 4, 12),
+  head: new THREE.SphereGeometry(0.34, 20, 14),
   eye: new THREE.SphereGeometry(0.04, 6, 6),
-  hat: new THREE.CylinderGeometry(0.38, 0.38, 0.06, 18),
-  hatTop: new THREE.SphereGeometry(0.22, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+  hat: new THREE.CylinderGeometry(0.46, 0.46, 0.06, 20),
+  hatTop: new THREE.SphereGeometry(0.28, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2),
   arm: new THREE.CapsuleGeometry(0.09, 0.28, 4, 6),
   hand: new THREE.SphereGeometry(0.11, 10, 8),
   mouth: new THREE.SphereGeometry(0.05, 8, 6),
-  hair: new THREE.SphereGeometry(0.28, 12, 8),
+  hair: new THREE.SphereGeometry(0.36, 14, 10),
+  hairBang: new THREE.SphereGeometry(0.16, 10, 8),
+  hairSide: new THREE.SphereGeometry(0.14, 10, 8),
 };
 const CHIBI_SKIN_MAT = new THREE.MeshLambertMaterial({ color: 0xffcf87 });
 const CHIBI_PANTS_MAT = new THREE.MeshLambertMaterial({ color: 0x333a55 });
@@ -43,9 +48,15 @@ function chibiHairMat(color) {
 
 const HAIR_COLORS = [0x3a2412, 0x8a5232, 0xd4a552, 0x5a3820, 0x2a2018, 0xa86a42];
 
+// Module-level claim registry — every active worker that's walking toward a
+// specific harvestable records it here so another helper won't pick the same
+// target. Keeps multiple hires on different routes instead of a duplicate
+// conga line.
+const CLAIMED_HARVESTABLES = new WeakSet();
+
 // Shared geometry + material for items NPCs carry. Created once; every
 // worker/helper reuses these buffers (no GPU leak across hundreds of trips).
-const NPC_CARRY_PROTOS = {
+export const NPC_CARRY_PROTOS = {
   grass:  { geo: new THREE.IcosahedronGeometry(0.16, 0),            mat: new THREE.MeshLambertMaterial({ color: 0x5bbf3d }), rotZ: 0 },
   wood:   { geo: new THREE.BoxGeometry(0.22, 0.16, 0.16),            mat: new THREE.MeshLambertMaterial({ color: 0x8b5a2b }), rotZ: 0 },
   bale:   { geo: new THREE.CylinderGeometry(0.17, 0.17, 0.28, 10),   mat: new THREE.MeshLambertMaterial({ color: 0xe2c35a }), rotZ: Math.PI / 2 },
@@ -55,6 +66,8 @@ const NPC_CARRY_PROTOS = {
   sauce:  { geo: new THREE.CylinderGeometry(0.09, 0.11, 0.24, 10),   mat: new THREE.MeshLambertMaterial({ color: 0xd02e2a }), rotZ: 0 },
   chips:  { geo: new THREE.BoxGeometry(0.22, 0.18, 0.14),            mat: new THREE.MeshLambertMaterial({ color: 0xe6b548 }), rotZ: 0 },
   egg:    { geo: new THREE.SphereGeometry(0.12, 10, 8),              mat: new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }), rotZ: 0 },
+  milk:   { geo: new THREE.CylinderGeometry(0.11, 0.09, 0.26, 10),   mat: new THREE.MeshLambertMaterial({ color: 0xffffff }), rotZ: 0 },
+  corn:   { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.28, 8),    mat: new THREE.MeshLambertMaterial({ color: 0xf2c648 }), rotZ: 0 },
 };
 NPC_CARRY_PROTOS.egg.geo.scale(1, 1.25, 1);
 
@@ -68,7 +81,13 @@ function setNpcCarry(group, items) {
 
   if (!group.userData.carryGroup) {
     const cg = new THREE.Group();
-    cg.position.set(0, 0.9, 0.3); // front of torso
+    // carryAnchor === 'back' — tall backpack stack behind the torso;
+    // default → tight stack in front of the torso (arms).
+    if (group.userData.carryAnchor === 'back') {
+      cg.position.set(0, 1.1, -0.35);
+    } else {
+      cg.position.set(0, 0.9, 0.3);
+    }
     group.add(cg);
     group.userData.carryGroup = cg;
     group.userData.carryMeshes = [];
@@ -76,10 +95,15 @@ function setNpcCarry(group, items) {
   const cg = group.userData.carryGroup;
   const meshes = group.userData.carryMeshes;
 
-  // Build stack sequence, cap at 6 visible for readability
+  // Helpers carrying on their back get a taller visible cap for the bag
+  // look; chest-carried stacks stay at 6 so they don't spill through arms.
+  const visibleCap = group.userData.carryAnchor === 'back' ? 10 : 6;
+  const stepY = group.userData.carryAnchor === 'back' ? 0.16 : 0.18;
+
+  // Build stack sequence
   const seq = [];
   for (const [k, n] of Object.entries(items || {})) {
-    for (let i = 0; i < n && seq.length < 6; i++) seq.push(k);
+    for (let i = 0; i < n && seq.length < visibleCap; i++) seq.push(k);
   }
 
   while (meshes.length < seq.length) {
@@ -99,7 +123,7 @@ function setNpcCarry(group, items) {
     m.material = proto.mat;
     m.position.set(((i * 41) % 9 - 4) * 0.01, y, 0);
     m.rotation.z = proto.rotZ;
-    y += 0.18;
+    y += stepY;
   }
 }
 
@@ -132,19 +156,19 @@ function makeChibi(color, hatColor = 0xc69645, hairColor = null, faceVariant = '
   const hair = chibiHairMat(hairColor ?? HAIR_COLORS[Math.floor(Math.random() * HAIR_COLORS.length)]);
 
   const legL = new THREE.Mesh(CHIBI_GEOS.leg, CHIBI_PANTS_MAT);
-  legL.position.set(-0.14, 0.3, 0);
+  legL.position.set(-0.14, 0.26, 0);
   const legR = new THREE.Mesh(CHIBI_GEOS.leg, CHIBI_PANTS_MAT);
-  legR.position.set(0.14, 0.3, 0);
+  legR.position.set(0.14, 0.26, 0);
   g.add(legL, legR);
 
   const torso = new THREE.Mesh(CHIBI_GEOS.torso, shirt);
-  torso.position.y = 0.85;
+  torso.position.y = 0.75;
   g.add(torso);
 
   const armL = new THREE.Mesh(CHIBI_GEOS.arm, shirt);
-  armL.position.set(-0.32, 0.95, 0);
+  armL.position.set(-0.32, 0.88, 0);
   const armR = new THREE.Mesh(CHIBI_GEOS.arm, shirt);
-  armR.position.set(0.32, 0.95, 0);
+  armR.position.set(0.32, 0.88, 0);
   g.add(armL, armR);
   const handL = new THREE.Mesh(CHIBI_GEOS.hand, CHIBI_SKIN_MAT);
   handL.position.set(0, -0.25, 0);
@@ -153,22 +177,40 @@ function makeChibi(color, hatColor = 0xc69645, hairColor = null, faceVariant = '
   handR.position.set(0, -0.25, 0);
   armR.add(handR);
 
-  // Hair sticks out from under the hat at the back + sides
+  // Back hair — big puffy hemisphere wrapped around the back of the head
   const hairMesh = new THREE.Mesh(CHIBI_GEOS.hair, hair);
-  hairMesh.position.y = 1.5;
-  hairMesh.scale.set(1.02, 0.65, 1.02);
+  hairMesh.position.set(0, 1.48, -0.02);
+  hairMesh.scale.set(1.05, 0.75, 1.05);
   g.add(hairMesh);
 
-  // Head with painted face texture
+  // Head with painted face texture (bigger for anime proportions)
   const head = new THREE.Mesh(CHIBI_GEOS.head, getFaceMaterial(faceVariant));
-  head.position.y = 1.45;
+  head.position.y = 1.5;
   g.add(head);
 
+  // Front bangs — two small hair puffs above the face for an anime fringe
+  const bangL = new THREE.Mesh(CHIBI_GEOS.hairBang, hair);
+  bangL.position.set(-0.12, 1.76, 0.23);
+  bangL.scale.set(1.1, 0.6, 0.8);
+  const bangR = new THREE.Mesh(CHIBI_GEOS.hairBang, hair);
+  bangR.position.set(0.12, 1.76, 0.23);
+  bangR.scale.set(1.1, 0.6, 0.8);
+  g.add(bangL, bangR);
+
+  // Side hair tufts at ears — give character silhouette some swoop
+  const sideL = new THREE.Mesh(CHIBI_GEOS.hairSide, hair);
+  sideL.position.set(-0.3, 1.45, 0.08);
+  sideL.scale.set(0.9, 1.4, 0.8);
+  const sideR = new THREE.Mesh(CHIBI_GEOS.hairSide, hair);
+  sideR.position.set(0.3, 1.45, 0.08);
+  sideR.scale.set(0.9, 1.4, 0.8);
+  g.add(sideL, sideR);
+
   const hatMesh = new THREE.Mesh(CHIBI_GEOS.hat, hat);
-  hatMesh.position.y = 1.7;
+  hatMesh.position.y = 1.84;
   g.add(hatMesh);
   const hatTop = new THREE.Mesh(CHIBI_GEOS.hatTop, hat);
-  hatTop.position.y = 1.7;
+  hatTop.position.y = 1.84;
   g.add(hatTop);
 
   g.userData.legs = [legL, legR];
@@ -264,6 +306,7 @@ export class CustomerQueue {
     if (sites.sauceFactory?.completed) opts.push('sauce');
     if (sites.chipsFactory?.completed) opts.push('chips');
     if (sites.eggFarm?.completed) opts.push('egg');
+    if (sites.dairyFarm?.completed) opts.push('milk');
     return opts;
   }
 
@@ -478,45 +521,135 @@ const CUSTOMER_FLIGHT_PROTOS = {
   sauce:  { geo: new THREE.CylinderGeometry(0.1, 0.13, 0.3, 10), mat: new THREE.MeshLambertMaterial({ color: 0xd02e2a }) },
   chips:  { geo: new THREE.BoxGeometry(0.25, 0.2, 0.2),          mat: new THREE.MeshLambertMaterial({ color: 0xe6b548 }) },
   egg:    { geo: new THREE.SphereGeometry(0.14, 10, 8),          mat: new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }) },
+  milk:   { geo: new THREE.CylinderGeometry(0.13, 0.1, 0.3, 10),  mat: new THREE.MeshLambertMaterial({ color: 0xffffff }) },
+  corn:   { geo: new THREE.CylinderGeometry(0.07, 0.07, 0.32, 8), mat: new THREE.MeshLambertMaterial({ color: 0xf2c648 }) },
 };
 CUSTOMER_FLIGHT_PROTOS.egg.geo.scale(1, 1.25, 1);
 
-// Helper NPC — hireable farmer that walks meadow → deposit loop endlessly.
+// Helper NPC — hired from the HUD button. A full farmhand: slashes grass,
+// chops trees, occasionally harvests crop plots, and delivers whatever they
+// picked up to the matching factory (fallback: market).
+//   grass  → hayBaler
+//   wood   → sawMill
+//   tomato → sauceFactory (else market)
+//   potato → chipsFactory (else market)
+//   corn   → eggFarm      (else market)
 export class Helper {
-  constructor(scene, world, buildManager) {
+  constructor(scene, world, buildManager, particles = null) {
     this.scene = scene;
     this.world = world;
     this.buildManager = buildManager;
+    this.particles = particles;
 
     this.group = makeChibi(0x8a3a55, 0xe1b458);
     this.group.position.set(CONFIG.world.spawnPos.x, 0, CONFIG.world.spawnPos.z);
+    // Helpers get backpack-anchored carry (raw materials stacked high on back)
+    this.group.userData.carryAnchor = 'back';
     scene.add(this.group);
 
-    this.carried = 0;
-    this.capacity = CONFIG.helpers.capacity;
+    this.carrying = {};       // { grass: n, wood: n, tomato: n, ... }
     this.walkPhase = 0;
-    this.state = 'toMeadow';
-    this._pickTarget();
+    this.state = 'idle';
     this.harvestTimer = 0;
+    // Each helper prefers a different starting job so two hires don't
+    // instantly pick the same target tree / grass on spawn.
+    this._preferredFirstJob = ['grass', 'wood', 'grass', 'crop'][
+      Math.floor(Math.random() * 4)
+    ];
+    this._pickJob(true);
   }
 
-  _pickTarget() {
-    if (this.state === 'toMeadow') {
-      const { meadow } = CONFIG.world;
-      this.target = {
-        x: meadow.minX + Math.random() * (meadow.maxX - meadow.minX),
-        z: meadow.minZ + Math.random() * (meadow.maxZ - meadow.minZ),
-      };
-    } else if (this.state === 'toDepot') {
-      const baler = this.buildManager.sites.hayBaler;
-      const site = baler.completed ? baler : (this.buildManager.active || baler);
-      const p = site.dropoffPos || site.position;
-      this.target = { x: p.x + (Math.random() - 0.5) * 1.8, z: p.z + (Math.random() - 0.5) * 1.8 };
+  _releaseClaim() {
+    if (this.targetHarvestable) {
+      CLAIMED_HARVESTABLES.delete(this.targetHarvestable);
+      this.targetHarvestable = null;
     }
   }
 
+  get capacity() {
+    return Math.round(CONFIG.helpers.capacity * HelperStats.capMul);
+  }
+
+  _carriedTotal() {
+    let t = 0;
+    for (const v of Object.values(this.carrying)) t += v;
+    return t;
+  }
+
+  // Decide what this trip targets. Crops only selected if a farm has ready
+  // cells. Otherwise weighted grass vs wood — ~60% grass, ~40% wood.
+  _pickJob(first = false) {
+    this._releaseClaim();
+    const anyCrop = this.world.harvestables.some(
+      (h) => h.kind === 'cropCell' && !h.removed,
+    );
+    if (first && this._preferredFirstJob) {
+      if (this._preferredFirstJob === 'crop' && !anyCrop) {
+        this.currentType = 'grass';
+      } else {
+        this.currentType = this._preferredFirstJob;
+      }
+      this._preferredFirstJob = null;
+    } else {
+      const roll = Math.random();
+      if (anyCrop && roll < 0.22) this.currentType = 'crop';
+      else if (roll < 0.62) this.currentType = 'grass';
+      else this.currentType = 'wood';
+    }
+    this._pickHarvestable();
+  }
+
+  // Pick the nearest unclaimed harvestable matching our job type. Adds a
+  // small jitter bonus so two workers at similar distances tie-break onto
+  // different trees rather than racing to the same one.
+  _pickHarvestable() {
+    this._releaseClaim();
+    const px = this.group.position.x;
+    const pz = this.group.position.z;
+    let best = null; let bestScore = Infinity;
+    for (const h of this.world.harvestables) {
+      if (h.removed || h._locked) continue;
+      if (CLAIMED_HARVESTABLES.has(h)) continue; // another helper has this one
+      let match = false;
+      if (this.currentType === 'grass') match = h.type === 'grass';
+      else if (this.currentType === 'wood') match = h.type === 'tree';
+      else if (this.currentType === 'crop') match = h.kind === 'cropCell';
+      if (!match) continue;
+      const dx = h.position.x - px;
+      const dz = h.position.z - pz;
+      const d = dx * dx + dz * dz;
+      // Small hashed jitter keeps two helpers from snapping to the same
+      // equidistant target every frame.
+      const jitter = ((h.instanceId ?? 0) * 7919 % 97) * 0.01;
+      const score = d + jitter;
+      if (score < bestScore) { bestScore = score; best = h; }
+    }
+    if (best) {
+      this.target = { x: best.position.x, z: best.position.z };
+      this.targetHarvestable = best;
+      CLAIMED_HARVESTABLES.add(best);
+      this.state = 'toTarget';
+    } else {
+      this.state = 'replan';
+      this.target = { x: px, z: pz };
+      this.targetHarvestable = null;
+    }
+  }
+
+  // Where to deliver based on the primary item we're carrying.
+  _deliveryTarget() {
+    const sites = this.buildManager.sites;
+    const c = this.carrying;
+    if ((c.tomato || 0) > 0 && sites.sauceFactory?.completed) return sites.sauceFactory;
+    if ((c.potato || 0) > 0 && sites.chipsFactory?.completed) return sites.chipsFactory;
+    if ((c.corn || 0) > 0 && sites.eggFarm?.completed) return sites.eggFarm;
+    if ((c.wood || 0) > 0 && sites.sawMill?.completed) return sites.sawMill;
+    if ((c.grass || 0) > 0 && sites.hayBaler?.completed) return sites.hayBaler;
+    return sites.market;
+  }
+
   update(dt) {
-    const speed = CONFIG.helpers.moveSpeed;
+    const speed = CONFIG.helpers.moveSpeed * HelperStats.speedMul;
     const dx = this.target.x - this.group.position.x;
     const dz = this.target.z - this.group.position.z;
     const dist = Math.hypot(dx, dz);
@@ -527,43 +660,81 @@ export class Helper {
       this.walkPhase += dt * 10;
       animateWalk(this.group, this.walkPhase);
       this.group.rotation.y = Math.atan2(dx / dist, dz / dist);
-      setNpcCarry(this.group, { grass: this.carried });
+      setNpcCarry(this.group, this.carrying);
       return;
     }
-    if (this.state === 'toMeadow') {
-      this.state = 'harvesting';
-      this.harvestTimer = 0;
-    } else if (this.state === 'harvesting') {
+    damperWalk(this.group);
+
+    if (this.state === 'toTarget') {
+      // Target may have been removed by the player slashing — re-plan.
+      if (!this.targetHarvestable || this.targetHarvestable.removed) {
+        this._pickHarvestable();
+        return;
+      }
+      // Arrived — slash animation on right arm + harvest.
       this.harvestTimer += dt;
-      if (this.harvestTimer > 0.55) {
+      if (this.group.userData.arms) {
+        this.group.userData.arms[1].rotation.x =
+          -1.4 + Math.min(1, this.harvestTimer / 0.3) * 1.0;
+      }
+      if (this.harvestTimer >= 0.35) {
         this.harvestTimer = 0;
-        let best = null; let bestD = Infinity;
-        for (const h of this.world.harvestables) {
-          if (h.removed || h.type !== 'grass') continue;
-          const ddx = h.position.x - this.group.position.x;
-          const ddz = h.position.z - this.group.position.z;
-          const d = ddx * ddx + ddz * ddz;
-          if (d < bestD) { bestD = d; best = h; }
-        }
-        if (best && bestD < 16) {
-          this.world.removeHarvestable(best);
-          this.carried += 1;
-          if (this.carried >= this.capacity) {
-            this.state = 'toDepot';
-            this._pickTarget();
+        const h = this.targetHarvestable;
+        if (h && !h.removed && !h._locked) {
+          const key = h.yield.key;
+          const amt = h.yield.amount || 1;
+          this.carrying[key] = (this.carrying[key] || 0) + amt;
+          // Short pop-burst at the harvest point — "pop out" grammar so the
+          // user sees the conversion even when the chibi sprite is tiny.
+          if (this.particles) {
+            this.particles.burst(
+              { x: h.position.x, y: 0.8, z: h.position.z },
+              {
+                count: 10,
+                power: 3.2,
+                ttl: 0.55,
+                scale: 0.7,
+                colors: h.type === 'tree'
+                  ? [0x8b5a2b, 0xa66633, 0x3fd238, 0xffffff]
+                  : [0x6eff3c, 0x3fd920, 0xffffff, 0xffdb47],
+              },
+            );
           }
+          this.world.removeHarvestable(h);
+        }
+        CLAIMED_HARVESTABLES.delete(h);
+        this.targetHarvestable = null;
+        if (this._carriedTotal() >= this.capacity) {
+          const dst = this._deliveryTarget();
+          const p = dst.dropoffPos || dst.position;
+          this.target = {
+            x: p.x + (Math.random() - 0.5) * 1.6,
+            z: p.z + (Math.random() - 0.5) * 1.2,
+          };
+          this.state = 'toDepot';
         } else {
-          this.state = 'toMeadow';
-          this._pickTarget();
+          this._pickHarvestable();
+          if (this.state !== 'toTarget' && this._carriedTotal() > 0) {
+            const dst = this._deliveryTarget();
+            const p = dst.dropoffPos || dst.position;
+            this.target = {
+              x: p.x + (Math.random() - 0.5) * 1.6,
+              z: p.z + (Math.random() - 0.5) * 1.2,
+            };
+            this.state = 'toDepot';
+          }
         }
       }
     } else if (this.state === 'toDepot') {
-      Inventory.add('grass', this.carried);
-      this.carried = 0;
-      this.state = 'toMeadow';
-      this._pickTarget();
+      for (const [k, v] of Object.entries(this.carrying)) {
+        if (v > 0) Inventory.add(k, v);
+      }
+      this.carrying = {};
+      this._pickJob();
+    } else {
+      this._pickJob();
     }
-    setNpcCarry(this.group, { grass: this.carried });
+    setNpcCarry(this.group, this.carrying);
   }
 }
 
@@ -669,10 +840,12 @@ export class WanderingNpc {
 export class AmbientNpcManager {
   constructor(scene) {
     this.npcs = [];
-    // Trimmed to 2 — chibi NPCs add 8 draw calls each.
+    // Trimmed to 2 — chibi NPCs add 8 draw calls each. Positioned inside the
+    // northern meadow / forest so they read on the tighter play rectangle
+    // and never wander south of the customer road.
     const bounds = [
-      { x0: -20, x1: -10, z0: 6, z1: 18 },
-      { x0: 10, x1: 22, z0: 20, z1: 28 },
+      { x0: -22, x1: -12, z0: -18, z1: -8 },
+      { x0:  12, x1:  22, z0: -18, z1: -8 },
     ];
     for (const b of bounds) this.npcs.push(new WanderingNpc(scene, b));
   }
@@ -714,7 +887,8 @@ export class BuildingWorker {
   }
 
   update(dt) {
-    const speed = CONFIG.buildingWorker.moveSpeed;
+    const speed = CONFIG.buildingWorker.moveSpeed * HelperStats.speedMul;
+    this.cap = Math.round(CONFIG.buildingWorker.carryCap * HelperStats.capMul);
     const dx = this.target.x - this.group.position.x;
     const dz = this.target.z - this.group.position.z;
     const dist = Math.hypot(dx, dz);
@@ -803,6 +977,7 @@ export class FarmWorker {
     const sites = this.buildManager.sites;
     if ((this.carrying.tomato || 0) > 0 && sites.sauceFactory?.completed) return sites.sauceFactory;
     if ((this.carrying.potato || 0) > 0 && sites.chipsFactory?.completed) return sites.chipsFactory;
+    if ((this.carrying.corn || 0) > 0 && sites.eggFarm?.completed) return sites.eggFarm;
     return sites.market;
   }
 
@@ -814,7 +989,8 @@ export class FarmWorker {
 
   update(dt) {
     if (!this.farm.unlocked) return;
-    const speed = CONFIG.farmWorker.moveSpeed;
+    const speed = CONFIG.farmWorker.moveSpeed * HelperStats.speedMul;
+    this.cap = Math.round(CONFIG.farmWorker.carryCap * HelperStats.capMul);
     const dx = this.target.x - this.group.position.x;
     const dz = this.target.z - this.group.position.z;
     const dist = Math.hypot(dx, dz);
@@ -879,14 +1055,17 @@ export class FarmWorker {
 }
 
 export class HelperManager {
-  constructor(scene, world, buildManager) {
+  constructor(scene, world, buildManager, particles = null) {
     this.scene = scene;
     this.world = world;
     this.buildManager = buildManager;
+    this.particles = particles;
     this.helpers = [];
     this.buildingWorkers = [];
     this.farmWorkers = [];
   }
+
+  setParticles(p) { this.particles = p; }
 
   hireBuildingWorker(buildingKey) {
     const site = this.buildManager.sites[buildingKey];
@@ -908,7 +1087,7 @@ export class HelperManager {
     if (Inventory.coin < cost) return false;
     Inventory.coin -= cost;
     Inventory.emit();
-    this.helpers.push(new Helper(this.scene, this.world, this.buildManager));
+    this.helpers.push(new Helper(this.scene, this.world, this.buildManager, this.particles));
     return true;
   }
   update(dt) {

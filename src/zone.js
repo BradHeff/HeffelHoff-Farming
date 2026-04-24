@@ -14,10 +14,14 @@ export class ZoneDecal {
     dashSpacing = [32, 22],
     textSize = 92,
     highlightColor = null,   // when set, enables setHighlighted(true)
+    rounded = false,          // round the border corners (looks like a pill)
+    cornerRadius = 0.28,      // fraction of min(width,depth) for rounded mode
   } = {}) {
     this.width = width;
     this.depth = depth;
     this.label = label;
+    this._rounded = rounded;
+    this._cornerRadius = cornerRadius;
 
     // Pixel resolution scales with dims for consistent line thickness
     const pxPerUnit = 160;
@@ -68,33 +72,82 @@ export class ZoneDecal {
     const w = this._w, h = this._h;
     ctx.clearRect(0, 0, w, h);
 
+    const roundedRectPath = (x, y, rw, rh, r) => {
+      const rr = Math.min(r, rw / 2, rh / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + rr, y);
+      ctx.lineTo(x + rw - rr, y);
+      ctx.quadraticCurveTo(x + rw, y, x + rw, y + rr);
+      ctx.lineTo(x + rw, y + rh - rr);
+      ctx.quadraticCurveTo(x + rw, y + rh, x + rw - rr, y + rh);
+      ctx.lineTo(x + rr, y + rh);
+      ctx.quadraticCurveTo(x, y + rh, x, y + rh - rr);
+      ctx.lineTo(x, y + rr);
+      ctx.quadraticCurveTo(x, y, x + rr, y);
+      ctx.closePath();
+    };
+
+    const cornerR = this._rounded
+      ? Math.round(Math.min(w, h) * this._cornerRadius)
+      : 0;
+
     if (highlighted && this._highlightColor) {
       // Filled background tile with thick solid border — "active / step here"
-      ctx.fillStyle = this._highlightColor + '55'; // semi-transparent fill
-      ctx.fillRect(0, 0, w, h);
-      ctx.strokeStyle = this._highlightColor;
       ctx.lineWidth = Math.max(18, Math.round(this._pxPerUnit * 0.1));
       const pad = ctx.lineWidth * 0.6;
-      ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
+      if (this._rounded) {
+        roundedRectPath(pad, pad, w - pad * 2, h - pad * 2, cornerR);
+        ctx.fillStyle = this._highlightColor + '55';
+        ctx.fill();
+        ctx.strokeStyle = this._highlightColor;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = this._highlightColor + '55';
+        ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = this._highlightColor;
+        ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
+      }
     } else {
-      // Resting state — subtle background + dashed outline
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.fillRect(0, 0, w, h);
-      ctx.strokeStyle = this._color;
       ctx.lineWidth = Math.max(10, Math.round(this._pxPerUnit * 0.065));
-      ctx.setLineDash(this._dashSpacing);
       const pad = ctx.lineWidth * 0.75;
-      ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
-      ctx.setLineDash([]);
+      if (this._rounded) {
+        roundedRectPath(pad, pad, w - pad * 2, h - pad * 2, cornerR);
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.fill();
+        ctx.strokeStyle = this._color;
+        ctx.setLineDash(this._dashSpacing);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = this._color;
+        ctx.setLineDash(this._dashSpacing);
+        ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
+        ctx.setLineDash([]);
+      }
     }
 
-    // Label + icon
+    // Label + icon — auto-shrink the font so the full string fits inside
+    // the decal. Emojis count as wide glyphs, so a "HIRE" + emoji label at
+    // the requested 120px would often spill past the canvas edge and show
+    // as "Hir" etc. We step the font size down until it fits.
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `bold ${this._textSize}px system-ui, sans-serif`;
     const text = (this._icon ? this._icon + ' ' : '') + (this.label || '');
     if (text) {
-      ctx.lineWidth = 10;
+      const maxTextW = w * 0.82;
+      const maxTextH = h * 0.70;
+      let sz = this._textSize;
+      ctx.font = `bold ${sz}px system-ui, sans-serif`;
+      while (
+        sz > 24 &&
+        (ctx.measureText(text).width > maxTextW || sz > maxTextH)
+      ) {
+        sz = Math.max(24, sz - 6);
+        ctx.font = `bold ${sz}px system-ui, sans-serif`;
+      }
+      ctx.lineWidth = Math.max(6, Math.round(sz * 0.08));
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.strokeText(text, w / 2, h / 2);
       ctx.fillStyle = highlighted && this._highlightColor ? '#ffffff' : this._textColor;

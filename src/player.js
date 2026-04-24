@@ -180,26 +180,9 @@ export class Player {
     pivot.add(this.slashTip);
   }
 
-  _buildGroundRing() {
-    this._groundRingMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: 0.35,
-      side: THREE.DoubleSide, depthWrite: false,
-    });
-    this.groundRing = new THREE.Mesh(this._makeRingGeo(PlayerStats.slashRadius), this._groundRingMat);
-    this.groundRing.position.y = 0.05;
-    this.group.add(this.groundRing);
-    PlayerStats.subscribe(() => {
-      const old = this.groundRing.geometry;
-      this.groundRing.geometry = this._makeRingGeo(PlayerStats.slashRadius);
-      if (old) old.dispose();
-    });
-  }
-
-  _makeRingGeo(radius) {
-    const g = new THREE.RingGeometry(radius - 0.12, radius + 0.04, 48);
-    g.rotateX(-Math.PI / 2);
-    return g;
-  }
+  // The always-on slash-radius ring was visual noise under the player's
+  // feet. Removed — the slash arc fan already reads clearly when it fires.
+  _buildGroundRing() { /* intentionally no-op */ }
 
   // Back stack — shared pool of meshes that renders the uncapped backpack.
   _buildBackStack() {
@@ -370,9 +353,23 @@ export class Player {
       this.velocity.set(nx * speed * Math.min(mag, 1), 0, nz * speed * Math.min(mag, 1));
       this.group.position.x += this.velocity.x * dt;
       this.group.position.z += this.velocity.z * dt;
-      const half = CONFIG.world.size / 2 - 1.5;
-      this.group.position.x = Math.max(-half, Math.min(half, this.group.position.x));
-      this.group.position.z = Math.max(-half, Math.min(half, this.group.position.z));
+      // Clamp to the rectangular playable bounds so the player can't walk
+      // off the ground plane past the southern road.
+      const b = CONFIG.world.bounds;
+      if (b) {
+        this.group.position.x = Math.max(b.minX + 0.8, Math.min(b.maxX - 0.8, this.group.position.x));
+        this.group.position.z = Math.max(b.minZ + 0.8, Math.min(b.maxZ - 0.8, this.group.position.z));
+      } else {
+        const half = CONFIG.world.size / 2 - 1.5;
+        this.group.position.x = Math.max(-half, Math.min(half, this.group.position.x));
+        this.group.position.z = Math.max(-half, Math.min(half, this.group.position.z));
+      }
+      // Expansion gate — while locked, the player cannot cross the fence
+      // line. Small tolerance so you can physically touch the gate.
+      const gateZ = this._expansionGateZ;
+      if (gateZ != null && !this._expansionGateOpen && this.group.position.z < gateZ + 0.5) {
+        this.group.position.z = gateZ + 0.5;
+      }
       const targetYaw = Math.atan2(nx, nz);
       // Faster turn so changing direction (including southward) is snappy
       this.bodyGroup.rotation.y = this._lerpAngle(this.bodyGroup.rotation.y, targetYaw, 1 - Math.exp(-18 * dt));
@@ -394,31 +391,41 @@ export class Player {
     }
 
     if (this.slashT > 0) {
-      this.slashT += dt / 0.26;
+      // Faster swing beat (0.22s) + big horizontal side-sweep. The body
+      // twists with the swing so it reads as a real scythe arc rather
+      // than a flat arm rotation.
+      this.slashT += dt / 0.22;
       if (this.slashT >= 1) {
         this.slashT = 0;
         this.slashOuter.material.opacity = 0;
         this.slashInner.material.opacity = 0;
         this.slashTip.material.opacity = 0;
+        this.torso.rotation.y = 0;
+        this.armR.rotation.z = 0;
       } else {
         const t = this.slashT;
         const env = Math.sin(t * Math.PI);
-        this.slashPivot.rotation.y = this.bodyGroup.rotation.y + (-0.9 + 1.8 * t);
-        this.slashOuter.material.opacity = env * 0.65;
+        this.slashPivot.rotation.y = this.bodyGroup.rotation.y + (-1.2 + 2.4 * t);
+        this.slashOuter.material.opacity = env * 0.7;
         this.slashInner.material.opacity = env * 0.95;
         this.slashTip.material.opacity = Math.pow(env, 1.5);
-        this.armR.rotation.x = -1.8 + 2.6 * t;
-        this.scythe.rotation.z = -1.0 + 2.2 * t;
-        this.scythe.rotation.x = -0.4 + env * 0.8;
+        // Arm sweeps wide sideways (rotation.z = right→left arc)
+        this.armR.rotation.x = -1.2 + 1.4 * t;
+        this.armR.rotation.z = 1.4 - 2.8 * t;
+        // Scythe follows the arm with its blade flattening into a flat sweep
+        this.scythe.rotation.z = -1.4 + 2.8 * t;
+        this.scythe.rotation.x = -0.3 + env * 0.6;
+        this.scythe.rotation.y = -0.5 + t * 1.0;
+        // Torso twist — counter-rotates with the swing for the wind-up →
+        // follow-through feel. Torso is a child of bodyGroup so this rides
+        // along with the movement rotation cleanly.
+        this.torso.rotation.y = (-0.35 + 0.7 * t) * env;
       }
     } else {
       this.armR.rotation.x *= 0.7;
       this.scythe.rotation.z *= 0.8;
       this.scythe.rotation.x += (-0.4 - this.scythe.rotation.x) * 0.2;
     }
-
-    const pulse = 0.32 + Math.sin(this.walkPhase * 1.5) * 0.05;
-    this.groundRing.material.opacity = this.isMoving ? pulse + 0.08 : pulse - 0.08;
 
     if (this.slashCooldown > 0) this.slashCooldown -= dt * 1000;
   }

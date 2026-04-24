@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { Inventory, PlayerStats } from './state.js';
 import { ZoneDecal } from './zone.js';
+import { showLevelBanner } from './hud.js';
 
 // A ground tile with a floating icon+cost card. Standing on it drains coins
 // from Inventory into the tile's buffer at a fast rate; when the buffer hits
@@ -23,6 +24,7 @@ export class UpgradeTile {
       label: '', icon: cfg.icon,
       color: '#b7f2ff', textColor: 'rgba(255,255,255,0.95)',
       textSize: 160,
+      rounded: true, cornerRadius: 0.32,
     });
     this.decal.setPosition(this.position.x, this.position.z);
     this.decal.addTo(scene);
@@ -36,7 +38,50 @@ export class UpgradeTile {
     scene.add(plinth);
     this.plinth = plinth;
 
+    // Green radial progress fill that grows as coins are paid in. We
+    // regenerate the CircleGeometry on pct change (only when it moves
+    // noticeably so we don't allocate every frame).
+    this._progressMat = new THREE.MeshBasicMaterial({
+      color: 0x4aff4a,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+    });
+    this._progressMesh = new THREE.Mesh(
+      this._buildProgressGeo(0),
+      this._progressMat,
+    );
+    this._progressMesh.position.set(this.position.x, 0.075, this.position.z);
+    this._progressMesh.renderOrder = 3;
+    scene.add(this._progressMesh);
+    this._lastPct = 0;
+
+    // Pool of small coin meshes that fall onto the tile while the player
+    // pays — "coins spilling" visual. 6 is enough to read as a stream.
+    this._coinPool = [];
+    this._coinActive = [];
+    const cGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.05, 10);
+    const cMat = new THREE.MeshLambertMaterial({ color: 0xffd04a });
+    for (let i = 0; i < 6; i++) {
+      const m = new THREE.Mesh(cGeo, cMat);
+      m.visible = false;
+      scene.add(m);
+      this._coinPool.push(m);
+    }
+    this._coinSpawnAcc = 0;
+
     this._buildFloatingCard();
+  }
+
+  // Pie slice starting at 12 o'clock growing clockwise so progress visually
+  // "fills" the circle. pct 0..1.
+  _buildProgressGeo(pct) {
+    const segments = 36;
+    const p = Math.max(0.001, Math.min(1, pct));
+    const g = new THREE.CircleGeometry(0.95, segments, -Math.PI / 2, p * Math.PI * 2);
+    g.rotateX(-Math.PI / 2);
+    return g;
   }
 
   get currentCost() {
@@ -76,22 +121,35 @@ export class UpgradeTile {
     this._refreshCard();
 
     if (inside && Inventory.coin > 0) {
-      // Accelerate slightly as player stays — feels responsive
+      // Fast drain so higher-level costs don't take forever: scale rate so
+      // any tier fills in ~1.5–2s if the player has the coins.
       this._paymentAcc += dt;
-      const rate = 0.04; // 25 coins/sec
-      while (this._paymentAcc >= rate && Inventory.coin > 0) {
-        this._paymentAcc -= rate;
+      const cost = this.currentCost;
+      const period = Math.max(0.008, 1.6 / cost); // total ~1.6s to fill
+      while (this._paymentAcc >= period && Inventory.coin > 0) {
+        this._paymentAcc -= period;
         Inventory.coin -= 1;
         Inventory.emit();
         this.paidIn += 1;
-        if (this.paidIn >= this.currentCost) {
+        if (this.paidIn >= cost) {
           this._commit();
           this.paidIn = 0;
+          break;
         }
+      }
+      // Spawn coin-drop meshes while paying
+      this._coinSpawnAcc += dt;
+      if (this._coinSpawnAcc >= 0.09) {
+        this._coinSpawnAcc = 0;
+        this._spawnCoinDrop();
       }
     } else {
       this._paymentAcc = 0;
+      this._coinSpawnAcc = 0;
     }
+
+    this._tickCoinDrops(dt);
+    this._updateProgressFill();
 
     // Project to screen for the floating card
     this._projVec.set(this.position.x, 1.8, this.position.z);
@@ -103,14 +161,76 @@ export class UpgradeTile {
     this.card.style.opacity = onscreen ? '1' : '0';
   }
 
+  _updateProgressFill() {
+    const pct = Math.min(1, this.paidIn / this.currentCost);
+    // Only regenerate when the pie slice moves visibly (≥ 2%) to avoid
+    // thrashing the geometry allocator.
+    if (Math.abs(pct - this._lastPct) < 0.02 && !(pct === 0 && this._lastPct > 0)) return;
+    this._lastPct = pct;
+    const old = this._progressMesh.geometry;
+    this._progressMesh.geometry = this._buildProgressGeo(pct);
+    if (old) old.dispose();
+    // Pop in color as it fills — greener as you approach 100%
+    const tint = 0.5 + pct * 0.4;
+    this._progressMat.opacity = tint;
+  }
+
+  _spawnCoinDrop() {
+    const m = this._coinPool.pop();
+    if (!m) return;
+    const a = Math.random() * Math.PI * 2;
+    const r = 0.6 + Math.random() * 0.3;
+    const sx = this.position.x + Math.cos(a) * r;
+    const sz = this.position.z + Math.sin(a) * r;
+    m.position.set(sx, 1.8, sz);
+    m.visible = true;
+    this._coinActive.push({
+      mesh: m,
+      vy: 0,
+      t: 0,
+      ttl: 0.65,
+      spin: (Math.random() - 0.5) * 14,
+      targetX: this.position.x + (Math.random() - 0.5) * 0.3,
+      targetZ: this.position.z + (Math.random() - 0.5) * 0.3,
+      startX: sx, startZ: sz,
+    });
+  }
+
+  _tickCoinDrops(dt) {
+    for (let i = this._coinActive.length - 1; i >= 0; i--) {
+      const c = this._coinActive[i];
+      c.t += dt;
+      const k = Math.min(1, c.t / c.ttl);
+      c.mesh.position.x = c.startX + (c.targetX - c.startX) * k;
+      c.mesh.position.z = c.startZ + (c.targetZ - c.startZ) * k;
+      c.mesh.position.y = 1.8 - 1.7 * k * k; // gravity-ish fall
+      c.mesh.rotation.y += c.spin * dt;
+      c.mesh.rotation.x += c.spin * 0.6 * dt;
+      if (k >= 1) {
+        c.mesh.visible = false;
+        this._coinPool.push(c.mesh);
+        this._coinActive.splice(i, 1);
+      }
+    }
+  }
+
   _commit() {
     PlayerStats.upgrade(this.key);
+    const lvl = PlayerStats.level[this.key];
+    showLevelBanner({
+      tier: `LEVEL ${lvl + 1}`,
+      name: this.cfg.label.toUpperCase(),
+      icon: this.cfg.icon || '⬆️',
+    });
   }
 
   dispose() {
     if (this.card) this.card.remove();
     this.decal.removeFrom(this.scene);
     this.scene.remove(this.plinth);
+    if (this._progressMesh) this.scene.remove(this._progressMesh);
+    for (const m of this._coinPool) this.scene.remove(m);
+    for (const c of this._coinActive) this.scene.remove(c.mesh);
   }
 }
 

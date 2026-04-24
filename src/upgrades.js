@@ -118,6 +118,11 @@ export class UpgradeTile {
     const dz = player.group.position.z - this.position.z;
     const inside = Math.hypot(dx, dz) < this.radius;
     this.decal.update(dt);
+    // Dramatic scale breathing so the upgrade pad reads as a special drop-off
+    this._pulseT = (this._pulseT || 0) + dt;
+    const breathe = 1.0 + Math.sin(this._pulseT * 3.0) * 0.08;
+    this.decal.mesh.scale.set(breathe, 1, breathe);
+    if (this.plinth) this.plinth.scale.set(breathe, 1, breathe);
     this._refreshCard();
 
     if (inside && Inventory.coin > 0) {

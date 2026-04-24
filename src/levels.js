@@ -69,6 +69,10 @@ export class BuildingLevelTile {
   update(dt, player) {
     if (!this.active) return;
     this.decal.update(dt);
+    // Dramatic scale breathing so building UP tiles read as special drop-offs
+    this._pulseT = (this._pulseT || 0) + dt;
+    const breathe = 1.0 + Math.sin(this._pulseT * 3.4) * 0.09;
+    this.decal.mesh.scale.set(breathe, 1, breathe);
 
     const tier = this._nextTier();
     if (!tier) {

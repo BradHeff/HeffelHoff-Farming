@@ -1,9 +1,9 @@
-import { Inventory } from './state.js';
+import { Inventory, UserLevel } from './state.js';
 
 export const RES_ICONS = {
   grass: '🌿', wood: '🪵', bale: '🌾', planks: '🪚',
   tomato: '🍅', potato: '🥔', sauce: '🍶', chips: '🍟', egg: '🥚',
-  milk: '🥛', corn: '🌽', coin: '🪙', meat: '🥩',
+  milk: '🥛', corn: '🌽', wheat: '🌾', coin: '🪙', meat: '🥩',
 };
 
 export function mountHUD() {
@@ -27,6 +27,37 @@ export function toast(msg) {
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 1400);
+}
+
+export function mountUserLevelPill() {
+  const pill = document.getElementById('user-level-pill');
+  if (!pill) return;
+  const numEl = pill.querySelector('.ul-num');
+  const fillEl = pill.querySelector('.ul-fill');
+  const xpEl = pill.querySelector('.ul-xp');
+  const refresh = () => {
+    numEl.textContent = UserLevel.level;
+    xpEl.textContent = `${UserLevel.xp}/${UserLevel.xpToNext} XP`;
+    const pct = Math.max(0, Math.min(1, UserLevel.xp / UserLevel.xpToNext));
+    fillEl.style.width = `${pct * 100}%`;
+  };
+  UserLevel.subscribe(refresh);
+  refresh();
+  // Short pop whenever level itself changes
+  let last = UserLevel.level;
+  UserLevel.subscribe(() => {
+    if (UserLevel.level !== last) {
+      last = UserLevel.level;
+      pill.classList.remove('pulse');
+      void pill.offsetWidth;
+      pill.classList.add('pulse');
+      showLevelBanner({
+        tier: `LEVEL ${UserLevel.level}`,
+        name: 'YOU LEVELED UP!',
+        icon: '⭐',
+      });
+    }
+  });
 }
 
 // Big level-up celebration banner. Re-triggering within the animation

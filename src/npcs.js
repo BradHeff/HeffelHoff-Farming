@@ -68,6 +68,7 @@ export const NPC_CARRY_PROTOS = {
   egg:    { geo: new THREE.SphereGeometry(0.12, 10, 8),              mat: new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }), rotZ: 0 },
   milk:   { geo: new THREE.CylinderGeometry(0.11, 0.09, 0.26, 10),   mat: new THREE.MeshLambertMaterial({ color: 0xffffff }), rotZ: 0 },
   corn:   { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.28, 8),    mat: new THREE.MeshLambertMaterial({ color: 0xf2c648 }), rotZ: 0 },
+  wheat:  { geo: new THREE.CylinderGeometry(0.05, 0.05, 0.3, 8),     mat: new THREE.MeshLambertMaterial({ color: 0xe8c54a }), rotZ: 0 },
 };
 NPC_CARRY_PROTOS.egg.geo.scale(1, 1.25, 1);
 
@@ -149,7 +150,8 @@ function damperWalk(group) {
 
 // Rounded chibi NPC. Head uses a CanvasTexture-painted face (eyes, mouth,
 // blush, eyebrows) — much more expressive than stacked primitive eyes.
-function makeChibi(color, hatColor = 0xc69645, hairColor = null, faceVariant = 'default') {
+// `variant` picks a body+hair archetype: 'default', 'female', 'child', 'merchant'.
+function makeChibi(color, hatColor = 0xc69645, hairColor = null, faceVariant = 'default', bodyVariant = 'default') {
   const g = new THREE.Group();
   const shirt = chibiShirtMat(color);
   const hat = chibiHatMat(hatColor);
@@ -206,12 +208,80 @@ function makeChibi(color, hatColor = 0xc69645, hairColor = null, faceVariant = '
   sideR.scale.set(0.9, 1.4, 0.8);
   g.add(sideL, sideR);
 
-  const hatMesh = new THREE.Mesh(CHIBI_GEOS.hat, hat);
-  hatMesh.position.y = 1.84;
-  g.add(hatMesh);
-  const hatTop = new THREE.Mesh(CHIBI_GEOS.hatTop, hat);
-  hatTop.position.y = 1.84;
-  g.add(hatTop);
+  let showHat = true;
+
+  // Variant accents — extra hair pieces, skirt, beard, scale tweaks.
+  if (bodyVariant === 'female') {
+    // Long ponytail trailing behind the head
+    const ponyGeo = new THREE.CylinderGeometry(0.1, 0.05, 0.65, 8);
+    const pony = new THREE.Mesh(ponyGeo, hair);
+    pony.position.set(0, 1.25, -0.38);
+    pony.rotation.x = 0.35;
+    g.add(pony);
+    const bow = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 0.1, 0.06),
+      chibiShirtMat(0xff4a9c),
+    );
+    bow.position.set(0, 1.52, -0.32);
+    g.add(bow);
+    // Short skirt around the hips
+    const skirtMat = chibiShirtMat(color);
+    const skirt = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.34, 12, 1, true), skirtMat);
+    skirt.position.y = 0.55;
+    g.add(skirt);
+    showHat = false;
+  } else if (bodyVariant === 'child') {
+    // Shrink everything about 15% for a smaller frame
+    g.scale.setScalar(0.8);
+    // Tiny backpack on the back so children read as school kids
+    const pack = new THREE.Mesh(
+      new THREE.BoxGeometry(0.32, 0.38, 0.15),
+      chibiShirtMat(0xff7036),
+    );
+    pack.position.set(0, 0.85, -0.28);
+    g.add(pack);
+  } else if (bodyVariant === 'merchant') {
+    // Bigger body + beard + vest (no separate hat)
+    g.scale.setScalar(1.1);
+    // Beard: dark half-ellipsoid hanging below the chin
+    const beard = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 12, 10, 0, Math.PI * 2, Math.PI * 0.4, Math.PI * 0.6),
+      hair,
+    );
+    beard.position.set(0, 1.35, 0.25);
+    beard.scale.set(1.0, 0.9, 0.7);
+    g.add(beard);
+    // Vest over the torso
+    const vest = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.3, 0.28, 4, 12),
+      chibiShirtMat(0x2a5a8a),
+    );
+    vest.position.y = 0.78;
+    vest.scale.z = 0.75;
+    g.add(vest);
+    // Flat cap instead of straw hat
+    const cap = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.38, 0.38, 0.1, 18),
+      chibiHatMat(0x3a2412),
+    );
+    cap.position.y = 1.8;
+    const capVisor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.6, 0.04, 0.25),
+      chibiHatMat(0x2a1808),
+    );
+    capVisor.position.set(0, 1.76, 0.32);
+    g.add(cap, capVisor);
+    showHat = false;
+  }
+
+  if (showHat) {
+    const hatMesh = new THREE.Mesh(CHIBI_GEOS.hat, hat);
+    hatMesh.position.y = 1.84;
+    g.add(hatMesh);
+    const hatTop = new THREE.Mesh(CHIBI_GEOS.hatTop, hat);
+    hatTop.position.y = 1.84;
+    g.add(hatTop);
+  }
 
   g.userData.legs = [legL, legR];
   g.userData.arms = [armL, armR];
@@ -307,6 +377,7 @@ export class CustomerQueue {
     if (sites.chipsFactory?.completed) opts.push('chips');
     if (sites.eggFarm?.completed) opts.push('egg');
     if (sites.dairyFarm?.completed) opts.push('milk');
+    if (this.farms && this.farms.some((f) => f.cropKey === 'wheat')) opts.push('wheat');
     return opts;
   }
 
@@ -341,7 +412,12 @@ export class CustomerQueue {
 
     const slot = activeCount;
     const color = cfg.colors[Math.floor(Math.random() * cfg.colors.length)];
-    const group = makeChibi(color, 0xffffff);
+    // Random customer archetype — mix of farmers, women (ponytail + skirt),
+    // kids, and merchants so the queue reads as a whole village.
+    const archetypes = ['default', 'female', 'female', 'child', 'default', 'merchant'];
+    const variant = archetypes[Math.floor(Math.random() * archetypes.length)];
+    const hatColor = variant === 'merchant' ? 0x3a2412 : 0xffffff;
+    const group = makeChibi(color, hatColor, null, 'default', variant);
     const entry = this._slotPos(cfg.maxQueue + 1);
     group.position.set(entry.x, 0, entry.z);
     group.rotation.y = Math.atan2(-cfg.queueDir.x, -cfg.queueDir.z);
@@ -480,6 +556,8 @@ export class CustomerQueue {
     // Consume items from Inventory
     Inventory[c.wantKey] = Math.max(0, (Inventory[c.wantKey] || 0) - c.wantQty);
     Inventory.emit();
+    // Notify listeners (goals system etc) that a sale happened.
+    if (this.onSold) this.onSold(c.wantKey, c.wantQty);
     // Pay out coins matching what they bought
     const rewards = this.marketSite.producerCfg?.sellRewards || {};
     const perUnit = rewards[c.wantKey] || 5;
@@ -523,6 +601,7 @@ const CUSTOMER_FLIGHT_PROTOS = {
   egg:    { geo: new THREE.SphereGeometry(0.14, 10, 8),          mat: new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }) },
   milk:   { geo: new THREE.CylinderGeometry(0.13, 0.1, 0.3, 10),  mat: new THREE.MeshLambertMaterial({ color: 0xffffff }) },
   corn:   { geo: new THREE.CylinderGeometry(0.07, 0.07, 0.32, 8), mat: new THREE.MeshLambertMaterial({ color: 0xf2c648 }) },
+  wheat:  { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.34, 8), mat: new THREE.MeshLambertMaterial({ color: 0xe8c54a }) },
 };
 CUSTOMER_FLIGHT_PROTOS.egg.geo.scale(1, 1.25, 1);
 
@@ -746,9 +825,13 @@ export class WanderingNpc {
     this.bounds = bounds;
     const shirtColors = [0x3a7dd6, 0xd4493c, 0x8a5ed1, 0xd4a53a, 0x3e9d6e];
     const hatColors   = [0xe1b458, 0xffffff, 0x5a3a2a, 0x2a3a5a];
+    const variants = ['default', 'female', 'child', 'default'];
     this.group = makeChibi(
       shirtColors[Math.floor(Math.random() * shirtColors.length)],
-      hatColors[Math.floor(Math.random() * hatColors.length)]
+      hatColors[Math.floor(Math.random() * hatColors.length)],
+      null,
+      'default',
+      variants[Math.floor(Math.random() * variants.length)],
     );
     this.group.position.set(
       bounds.x0 + Math.random() * (bounds.x1 - bounds.x0),

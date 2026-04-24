@@ -74,6 +74,7 @@ export class PickupManager {
       if (p.t >= 1) {
         if (p.isCarry) PlayerCarry.add(p.type, 1);
         else Backpack.add(p.type, 1);
+        if (this.onLand) this.onLand(p.type, 1);
         this.scene.remove(p.mesh);
         this.active.splice(i, 1);
       }

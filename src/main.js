@@ -4,20 +4,25 @@ import { World } from './world.js';
 import { Player } from './player.js';
 import { InputManager } from './input.js';
 import { PickupManager } from './pickups.js';
-import { Backpack, PlayerCarry, Inventory, PlayerStats } from './state.js';
+import { Backpack, PlayerCarry, Inventory, PlayerStats, UserLevel } from './state.js';
 import { BuildManager } from './buildings.js';
-import { mountHUD, toast, bindBuildPanel, positionBuildPanel, RES_ICONS, showLevelBanner } from './hud.js';
+import { mountHUD, mountUserLevelPill, toast, bindBuildPanel, positionBuildPanel, RES_ICONS, showLevelBanner } from './hud.js';
 import { FloaterManager, StickyLabel } from './floaters.js';
 import { UpgradeManager } from './upgrades.js';
 import { PlayerCoinTower } from './coins.js';
 import { CustomerQueue, HelperManager, AmbientNpcManager, Shopkeeper, NPC_CARRY_PROTOS } from './npcs.js';
 import { Tractor, TractorUnlockTile } from './tractor.js';
+import { HarvesterCrew, HarvesterUnlockTile } from './harvester.js';
 import { DustPuffManager } from './dust.js';
 import { LockedPlot } from './locks.js';
 import { FlightManager } from './flight.js';
 import { Farm } from './farms.js';
 import { BuildingUpgradeManager, BuildingHireManager, ExpansionTile, FarmHireManager, HelperTrainingTile } from './levels.js';
 import { ParticleBurst } from './particles.js';
+import { GoalManager } from './goals.js';
+import { TraderEvent } from './trader.js';
+import { showAuthScreen } from './auth.js';
+import { applySave, startAutoSave } from './save.js';
 
 class Game {
   constructor() {
@@ -59,6 +64,10 @@ class Game {
     this.player._expansionGateZ = this.world.expansionGateZ;
     this.player._expansionGateOpen = this.world.expansionGateOpen;
     this.pickups = new PickupManager(this.scene, this.player);
+    this.pickups.onLand = (key, n) => {
+      this._lifetimeCollected[key] = (this._lifetimeCollected[key] || 0) + n;
+      if (this.goals) this.goals.update();
+    };
     this.builds = new BuildManager(this.scene);
     this.input = new InputManager();
     this.floaters = new FloaterManager(this.camera);
@@ -74,11 +83,63 @@ class Game {
       this.scene, this.camera, this.builds.sites.market, this.flight,
       this.builds, this.farms, this.shopkeeper
     );
+    this.customers.onSold = (key, qty) => {
+      this._lifetimeSold[key] = (this._lifetimeSold[key] || 0) + qty;
+      if (this.goals) this.goals.update();
+    };
     this.dust = new DustPuffManager(this.scene);
     this.particles = new ParticleBurst(this.scene);
     this.helpers.setParticles(this.particles);
     this._buildGroundChevron();
     this._buildCrateStockPills();
+
+    // Lifetime counters that goals read from (slashed-by-type, collected,
+    // sold). GoalManager polls these + Inventory to track progress.
+    this._countSlashed = { tree: 0, grass: 0, crop: 0 };
+    this._lifetimeCollected = {};
+    this._lifetimeSold = {};
+    this._lifetimeCoinsEarned = 0;
+    this._traderCompleted = 0;
+    // Watch Inventory.coin for increments to aggregate lifetime earnings
+    this._lastCoinSeen = 0;
+    Inventory.subscribe(() => {
+      const now = Inventory.coin || 0;
+      if (now > this._lastCoinSeen) {
+        this._lifetimeCoinsEarned += (now - this._lastCoinSeen);
+      }
+      this._lastCoinSeen = now;
+    });
+    this.goals = new GoalManager(this);
+
+    // Farm patch auto-upgrades — every 2 user levels each farm grows +1 in
+    // each axis, up to tier 3. Banner fires via the farm hook.
+    UserLevel.subscribe(() => {
+      const targetTier = Math.min(3, 1 + Math.floor((UserLevel.level - 1) / 2));
+      for (const farm of this.farms) {
+        while (farm.tier < targetTier && farm.unlocked) {
+          const grew = farm.upgradeSize();
+          if (!grew) break;
+          showLevelBanner({
+            tier: `FARM +SIZE`,
+            name: `${farm.cols}×${farm.rows} bed`,
+            icon: '🌱',
+          });
+          if (this.particles) {
+            this.particles.burst(
+              { x: farm.center.x, y: 1.0, z: farm.center.z },
+              { count: 24, power: 5, ttl: 1.2, scale: 1.0 },
+            );
+          }
+        }
+      }
+    });
+    this.trader = new TraderEvent(
+      this.scene, this.camera, this.builds, this.flight, this.particles,
+    );
+    this.trader.onComplete = () => {
+      this._traderCompleted = (this._traderCompleted || 0) + 1;
+      if (this.goals) this.goals.update();
+    };
     this.buildingUpgrades = new BuildingUpgradeManager(this.scene, this.camera, this.builds);
     this.buildingHires = new BuildingHireManager(
       this.scene, this.camera, this.builds,
@@ -131,6 +192,13 @@ class Game {
       this.tractor.group.position.set(pos.x, 0, pos.z);
       this.tractor._pickRoamTarget();
     };
+    this.harvester = null;      // created on unlock
+    this.harvesterUnlock = new HarvesterUnlockTile(this.scene, this.camera, this.builds);
+    this.harvesterUnlock.onUnlock = () => {
+      this.harvester = new HarvesterCrew(
+        this.scene, this.world, this.farms, this.builds, NPC_CARRY_PROTOS, this.particles,
+      );
+    };
     this.expansionTile = new ExpansionTile(
       this.scene, this.camera, CONFIG.expansion, this.builds, this.world,
       () => {
@@ -151,6 +219,7 @@ class Game {
     );
 
     mountHUD();
+    mountUserLevelPill();
     bindBuildPanel(this.builds);
     this._bindHireButton();
     this._bindSeedModal();
@@ -163,7 +232,7 @@ class Game {
     this.elapsed = 0;
     this.lastDropoffKey = null;
     // FPS meter state
-    this._fpsEl = document.getElementById('fps-meter');
+    this._fpsEl = null; // FPS meter removed from HUD
     this._fpsAcc = 0;
     this._fpsFrames = 0;
 
@@ -181,10 +250,24 @@ class Game {
       b.addEventListener('click', () => {
         if (!this._pendingFarm) return;
         const crop = b.dataset.crop;
+        const minLevel = parseInt(b.dataset.minLevel || '1', 10);
+        if (UserLevel.level < minLevel) {
+          toast(`🔒 Unlocks at Level ${minLevel}`);
+          return;
+        }
         this._pendingFarm.seed(crop, this.world.harvestables);
         modal.classList.remove('show');
       });
     });
+    // Reflect current user level on the buttons (disabled styling)
+    const refreshButtons = () => {
+      buttons.forEach((b) => {
+        const minLevel = parseInt(b.dataset.minLevel || '1', 10);
+        b.classList.toggle('locked', UserLevel.level < minLevel);
+      });
+    };
+    UserLevel.subscribe(refreshButtons);
+    refreshButtons();
     this._seedModal = modal;
   }
 
@@ -426,6 +509,13 @@ class Game {
           `+${h.yield.amount} ${RES_ICONS[h.yield.key] || ''}`,
           { cls: 'gain', ttl: 0.9, vy: 1.8 }
         );
+        // Count slashed-by-type for goal progress (cut N trees / grass / etc)
+        if (h.type === 'tree') this._countSlashed.tree++;
+        else if (h.type === 'grass') this._countSlashed.grass++;
+        else if (h.kind === 'cropCell') this._countSlashed.crop++;
+        // Note: _lifetimeCollected is bumped in PickupManager.onLand instead,
+        // so produced items (bales etc.) count too.
+        if (this.goals) this.goals.update();
         this.world.removeHarvestable(h);
       }
     }
@@ -778,6 +868,9 @@ class Game {
     if (this.helperTraining) this.helperTraining.update(dt, this.player);
     if (this.tractorUnlock) this.tractorUnlock.update(dt, this.player, this.particles);
     if (this.tractor) this.tractor.update(dt);
+    if (this.harvesterUnlock) this.harvesterUnlock.update(dt, this.player, this.particles);
+    if (this.harvester) this.harvester.update(dt);
+    if (this.trader) this.trader.update(dt, this.player);
     if (this.dairyLock && !this.dairyLock.unlocked) this.dairyLock.update(dt, this.player);
     this._updateCamera();
     this._updateGpsArrow(dt);
@@ -808,5 +901,21 @@ class Game {
   }
 }
 
-new Game();
+// Show the auth start screen first; once the player is logged in (or has
+// chosen to play offline) we instantiate the game and apply any saved
+// state before the first frame.
+(async () => {
+  const { auth, savedState } = await showAuthScreen();
+  const game = new Game();
+  if (savedState) {
+    try { applySave(game, savedState); } catch (err) {
+      console.warn('[main] applySave failed:', err);
+    }
+  }
+  startAutoSave(game, auth);
+  // Expose for debugging
+  if (typeof window !== 'undefined') {
+    window.__hh = { game, auth };
+  }
+})();
 void PlayerStats;

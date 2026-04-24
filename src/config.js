@@ -160,14 +160,14 @@ export const CONFIG = {
       produces: 'coin',
       intervalSec: 1.8,
       // Coins per unit sold, by resource key
-      sellRewards: { bale: 8, planks: 12, tomato: 6, potato: 9, sauce: 18, chips: 22, egg: 14, milk: 16 },
+      sellRewards: { bale: 8, planks: 12, tomato: 6, potato: 9, sauce: 18, chips: 22, egg: 14, milk: 16, wheat: 20 },
       maxStackVisual: 120,
       // Market sells in this priority order when multiple goods are stocked
-      sellPriority: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'milk'],
+      sellPriority: ['wheat', 'sauce', 'chips', 'bale', 'planks', 'tomato', 'potato', 'egg', 'milk'],
     },
   },
   // Resources that live in the carry slot (in front of player). Others on back.
-  carryResources: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'milk', 'corn'],
+  carryResources: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'milk', 'corn', 'wheat'],
   // Crop definitions for the farm plot
   crops: {
     tomato: {
@@ -188,6 +188,14 @@ export const CONFIG = {
       leafColor: 0x5caa38, fruitColor: 0xf2c648,
       height: 0.9,
       growSec: 5.5,
+    },
+    // Premium cash crop — tall gold stalks, unlocked at user Lv 3.
+    wheat: {
+      key: 'wheat', name: 'Wheat', icon: '🌾',
+      leafColor: 0xbfa348, fruitColor: 0xe8c54a,
+      height: 1.0,
+      growSec: 7.0,
+      minUserLevel: 3,
     },
   },
   // Farm plot config — replaces old passive harvest
@@ -299,6 +307,40 @@ export const CONFIG = {
     hireCost: 150,
     moveSpeed: 4.0,
     carryCap: 4,
+  },
+  // Combine Harvester + companion tractor — two-vehicle end-game crop
+  // specialist. Slow compared to the general tractor but only eats crop
+  // cells (tomato / potato / corn / wheat). Tractor rides alongside,
+  // peels off to deliver when the bin fills, returns to resume.
+  harvester: {
+    unlockPos: { x: 8, z: -10 },
+    unlockCost: 1200,
+    minUserLevel: 4,
+    requiredL3: ['hayBaler', 'sawMill', 'sauceFactory', 'chipsFactory'],
+    harvesterSpeed: 2.8,         // slow sweep
+    tractorSpeed: 4.5,           // slightly faster than the harvester
+    harvestIntervalSec: 0.8,     // cut one cell every ~0.8s
+    binCapacity: 15,
+  },
+  // Trader truck event — periodic NPC truck that rolls onto the road south
+  // of the market demanding a stockpile of one product. Delivering fulfils
+  // the order for a coin reward, creating a recurring overflow sink.
+  trader: {
+    spawnDelaySec: 90,     // seconds after game start for the first arrival
+    intervalSec: 120,      // wait between orders
+    parkPos: { x: 6, z: 16 },    // on the customer road, east of queue
+    entryPos: { x: 28, z: 16 },  // off-screen east
+    exitPos:  { x: 28, z: 16 },
+    orders: [
+      { key: 'bale',   count: 10, reward: 120 },
+      { key: 'planks', count: 8,  reward: 160 },
+      { key: 'tomato', count: 8,  reward: 90 },
+      { key: 'potato', count: 8,  reward: 110 },
+      { key: 'sauce',  count: 6,  reward: 200 },
+      { key: 'chips',  count: 6,  reward: 220 },
+      { key: 'egg',    count: 8,  reward: 180 },
+      { key: 'milk',   count: 8,  reward: 190 },
+    ],
   },
   // Tractor — end-game unlock. Preview sits on a pulsing ring until all
   // core buildings are Lv3 AND helper training is Lv2+. Paying the cost

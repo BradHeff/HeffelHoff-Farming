@@ -45,19 +45,37 @@
           <div class="resource-pill" data-key="milk">
             <span class="icon">🥛</span><span class="count" data-count="milk">0</span>
           </div>
-          <div class="resource-pill" data-key="coin">
-            <span class="icon">🪙</span><span class="count" data-count="coin">0</span>
+        </div>
+        <div class="hud-center">
+          <div id="goal-pill" class="goal-pill" data-ui>
+            <span class="goal-icon"></span>
+            <span class="goal-body">
+              <span class="goal-title"></span>
+              <span class="goal-progress">
+                <span class="goal-bar"><span class="goal-fill"></span></span>
+                <span class="goal-count">0/0</span>
+              </span>
+            </span>
           </div>
         </div>
-        <div class="hud-center"></div>
         <div class="hud-bottom">
+          <div id="user-level-pill" class="user-level-pill" data-ui>
+            <div class="ul-badge"><span class="ul-num">1</span></div>
+            <div class="ul-body">
+              <div class="ul-label">LEVEL</div>
+              <div class="ul-bar"><div class="ul-fill"></div></div>
+              <div class="ul-xp">0/3 XP</div>
+            </div>
+          </div>
           <div id="hud-side">
             <button id="hire-btn" class="hud-btn" data-ui>👨‍🌾 Hire <span id="hire-cost">150</span>🪙</button>
+            <div id="coin-pill" class="resource-pill coin-pill" data-key="coin">
+              <span class="icon">🪙</span><span class="count" data-count="coin">0</span>
+            </div>
           </div>
         </div>
       </div>
       <div id="toast"></div>
-      <div id="fps-meter">FPS --</div>
       <div id="level-banner" class="level-banner">
         <div class="banner-inner">
           <div class="banner-badge"><span class="banner-icon"></span></div>
@@ -74,6 +92,7 @@
           <button class="seed-btn" data-crop="tomato">🍅<span>Tomato</span></button>
           <button class="seed-btn" data-crop="potato">🥔<span>Potato</span></button>
           <button class="seed-btn" data-crop="corn">🌽<span>Corn</span></button>
+          <button class="seed-btn" data-crop="wheat" data-min-level="3">🌾<span>Wheat</span></button>
         </div>
       </div>
       <!-- World-space DOM overlay (position updated per frame from main.js) -->

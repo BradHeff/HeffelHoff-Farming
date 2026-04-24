@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow cleartext HTTP to typical LAN backend hosts so the game can
+         reach a dev/prod Express server without requiring TLS certs. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

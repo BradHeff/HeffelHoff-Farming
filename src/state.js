@@ -34,6 +34,7 @@ export const Inventory = {
   egg: 0,
   milk: 0,
   corn: 0,
+  wheat: 0,
   coin: 0,
   _subs: new Set(),
   subscribe(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
@@ -75,7 +76,7 @@ export const Backpack = {
 // PlayerCarry — crafted/harvested items (bales, planks, crops). Rendered as
 // a stack in FRONT of the player (in their arms). Uncapped.
 export const PlayerCarry = {
-  items: { bale: 0, planks: 0, tomato: 0, potato: 0, sauce: 0, chips: 0, egg: 0, milk: 0, corn: 0 },
+  items: { bale: 0, planks: 0, tomato: 0, potato: 0, sauce: 0, chips: 0, egg: 0, milk: 0, corn: 0, wheat: 0 },
   _subs: new Set(),
   subscribe(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
   emit() { this._subs.forEach((fn) => fn(this)); },
@@ -115,6 +116,50 @@ PlayerStats.subscribe(() => Backpack.emit());
 // HelperStats — end-game multipliers shared across all hired NPCs (farm
 // workers, building workers, helpers). Raised by the Helper Training tile
 // which only appears after full-game prerequisites are met.
+// UserLevel — overall meta-progression. Every completed goal grants 1 XP;
+// leveling up unlocks higher-tier content and fires a big celebration.
+// Kept here so goals, HUD pill, and crop/equipment gates can all share one
+// source of truth.
+export const UserLevel = {
+  level: 1,
+  xp: 0,
+  xpToNext: 3,
+  _subs: new Set(),
+  subscribe(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
+  emit() { this._subs.forEach((fn) => fn(this)); },
+  grant(xp = 1) {
+    this.xp += xp;
+    let leveledUp = false;
+    while (this.xp >= this.xpToNext) {
+      this.xp -= this.xpToNext;
+      this.level += 1;
+      // Each tier needs slightly more XP than the previous
+      this.xpToNext = 3 + Math.floor(this.level * 1.5);
+      leveledUp = true;
+    }
+    this.emit();
+    return leveledUp;
+  },
+};
+
+// Sequential goal chain. Each entry describes ONE closable micro-goal that
+// the HUD pill tracks. When `check(state)` returns true, the goal completes,
+// the reward applies, and the next entry in the chain activates.
+// Kept here so state listeners can trigger re-checks on emit().
+export const Goals = {
+  index: 0,
+  // Filled by GoalManager on init
+  list: [],
+  _subs: new Set(),
+  subscribe(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
+  emit() { this._subs.forEach((fn) => fn(this)); },
+  current() { return this.list[this.index] || null; },
+  advance() {
+    if (this.index < this.list.length - 1) this.index += 1;
+    this.emit();
+  },
+};
+
 export const HelperStats = {
   level: 1,
   capMul: 1.0,   // multiplier on worker carry cap

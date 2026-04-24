@@ -36,6 +36,7 @@ export class Farm {
     this.requiresExpansion = !!cfg.requiresExpansion;
     this.expansionUnlocked = !this.requiresExpansion;
     this.cropKey = null;
+    this.tier = 1;          // 1: base size, 2 & 3: bigger plots
     // Each cell: { x, z, plant: Group|null, harvestable: ref|null,
     //              growT: seconds_since_seed, growSec: total_grow_time,
     //              state: 'empty'|'growing'|'ready' }
@@ -44,6 +45,99 @@ export class Farm {
 
     this._buildDecal();
     this._buildCells();
+    this._buildProps();
+  }
+
+  // Decorative props around the planter bed — watering can on the south-
+  // east corner, scarecrow on a stake, small seed sack. Pure set dressing,
+  // no collision. Adds character without adding draw-call cost.
+  _buildProps() {
+    const props = new THREE.Group();
+    this.decalGroup.add(props);
+    const w = this.bounds.width;
+    const d = this.bounds.depth;
+
+    // Watering can: blue metal body + spout + handle
+    const can = new THREE.Group();
+    const metalBlue = new THREE.MeshLambertMaterial({ color: 0x4a90c4 });
+    const metalDark = new THREE.MeshLambertMaterial({ color: 0x2a5a7a });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.2, 0.32, 12), metalBlue);
+    body.position.y = 0.35;
+    can.add(body);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.025, 6, 14), metalDark);
+    rim.rotation.x = Math.PI / 2;
+    rim.position.y = 0.51;
+    can.add(rim);
+    const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.28, 8), metalBlue);
+    spout.rotation.z = Math.PI / 2.6;
+    spout.position.set(0.22, 0.42, 0);
+    can.add(spout);
+    const spoutHead = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.05, 10), metalDark);
+    spoutHead.rotation.z = Math.PI / 2.6;
+    spoutHead.position.set(0.34, 0.48, 0);
+    can.add(spoutHead);
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 6, 14, Math.PI), metalDark);
+    handle.rotation.z = Math.PI;
+    handle.position.set(-0.05, 0.58, 0);
+    can.add(handle);
+    can.position.set(this.center.x + w / 2 + 0.4, 0, this.center.z + d / 2 + 0.3);
+    can.rotation.y = -0.6;
+    props.add(can);
+
+    // Scarecrow: wooden stake + straw body + pumpkin head with button eyes
+    const scare = new THREE.Group();
+    const woodMat = new THREE.MeshLambertMaterial({ color: 0x7a5232 });
+    const strawMat = new THREE.MeshLambertMaterial({ color: 0xd9b24a });
+    const clothMat = new THREE.MeshLambertMaterial({ color: 0xc43a3a });
+    const pumpkinMat = new THREE.MeshLambertMaterial({ color: 0xe07028 });
+    const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.4, 8), woodMat);
+    stake.position.y = 0.7;
+    scare.add(stake);
+    const crossArms = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.0, 6), woodMat);
+    crossArms.rotation.z = Math.PI / 2;
+    crossArms.position.y = 1.05;
+    scare.add(crossArms);
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.2), clothMat);
+    torso.position.y = 0.95;
+    scare.add(torso);
+    // Straw tufts at cuffs
+    const strawGeo = new THREE.IcosahedronGeometry(0.1, 0);
+    for (const x of [-0.5, 0.5]) {
+      const s1 = new THREE.Mesh(strawGeo, strawMat);
+      s1.position.set(x, 1.0, 0);
+      scare.add(s1);
+    }
+    // Pumpkin head
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), pumpkinMat);
+    head.scale.set(1.1, 0.9, 1.1);
+    head.position.y = 1.45;
+    scare.add(head);
+    // Eyes + smile
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x1a1008 });
+    const eyeGeo = new THREE.SphereGeometry(0.03, 6, 6);
+    const eyeL = new THREE.Mesh(eyeGeo, eyeMat); eyeL.position.set(-0.07, 1.48, 0.18); scare.add(eyeL);
+    const eyeR = new THREE.Mesh(eyeGeo, eyeMat); eyeR.position.set( 0.07, 1.48, 0.18); scare.add(eyeR);
+    scare.position.set(this.center.x - w / 2 - 0.6, 0, this.center.z + d / 2 + 0.2);
+    props.add(scare);
+
+    // Seed sack: burlap bag with a cord tie
+    const sack = new THREE.Group();
+    const sackMat = new THREE.MeshLambertMaterial({ color: 0xd9b880 });
+    const cordMat = new THREE.MeshLambertMaterial({ color: 0x6a4028 });
+    const sackBody = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 8), sackMat);
+    sackBody.scale.set(1.0, 1.2, 0.9);
+    sackBody.position.y = 0.2;
+    sack.add(sackBody);
+    const cord = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.018, 6, 14), cordMat);
+    cord.rotation.x = Math.PI / 2;
+    cord.position.y = 0.32;
+    sack.add(cord);
+    const neck = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.12, 8), sackMat);
+    neck.position.y = 0.4;
+    sack.add(neck);
+    sack.position.set(this.center.x + w / 2 + 0.3, 0, this.center.z - d / 2 - 0.35);
+    sack.rotation.y = 0.7;
+    props.add(sack);
   }
 
   _buildDecal() {
@@ -128,6 +222,7 @@ export class Farm {
         const x = startX + c * this.cfg.spacing;
         const z = startZ + r * this.cfg.spacing;
         this.cells.push({
+          col: c, row: r,
           x, z,
           plant: null, harvestable: null,
           growT: 0, growSec: 0,
@@ -141,6 +236,46 @@ export class Farm {
   setExpansionUnlocked(v) {
     this.expansionUnlocked = !!v;
     if (this.decalGroup) this.decalGroup.visible = this.expansionUnlocked;
+  }
+
+  // Grow the planter bed by +1 col and +1 row per tier (5x3 → 6x4 → 7x5).
+  // Preserves existing plants by matching cells on their grid coordinates.
+  upgradeSize() {
+    if (this.tier >= 3) return false;
+    this.tier += 1;
+    this.cols += 1;
+    this.rows += 1;
+    const oldCells = this.cells.slice();
+    // Clear the old visual group (soil + frame + furrows + props)
+    if (this.decalGroup) {
+      this.scene.remove(this.decalGroup);
+      this.decalGroup = null;
+    }
+    this.cells = [];
+    this._buildDecal();
+    this._buildCells();
+    // Copy matching old cells by (col, row) grid index and move the plant
+    // mesh to the new cell's world position (center shifts on resize).
+    for (const oldCell of oldCells) {
+      const match = this.cells.find((c) =>
+        c.col === oldCell.col && c.row === oldCell.row);
+      if (!match) continue;
+      if (oldCell.plant) {
+        match.plant = oldCell.plant;
+        match.plant.position.set(match.x, this.soilY, match.z);
+        match.state = oldCell.state;
+        match.growT = oldCell.growT;
+        match.growSec = oldCell.growSec;
+        match.cropKey = oldCell.cropKey;
+        match.harvestable = oldCell.harvestable;
+        if (match.harvestable) {
+          match.harvestable.cell = match;
+          match.harvestable.position = match.plant.position;
+        }
+      }
+    }
+    this._buildProps();
+    return true;
   }
 
   isInside(pos) {

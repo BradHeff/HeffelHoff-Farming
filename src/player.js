@@ -184,22 +184,359 @@ export class Player {
   // feet. Removed — the slash arc fan already reads clearly when it fires.
   _buildGroundRing() { /* intentionally no-op */ }
 
-  // Back stack — shared pool of meshes that renders the uncapped backpack.
+  // Klondike-style blue open crate factory. Each crate is a tiny group:
+  // four side panels + bottom + a colored "filler" mound poking out the top.
+  // Geometries + materials are SHARED across all crates (cached on `this`)
+  // so adding/removing crates never allocates more than the empty group.
+  _ensureCratePrototypes() {
+    if (this._crateProtos) return;
+    const blue = new THREE.MeshLambertMaterial({ color: 0x3aa1d8 });
+    const blueDark = new THREE.MeshLambertMaterial({ color: 0x2a7eb0 });
+    // Crate is 0.46 wide × 0.22 tall × 0.34 deep, panels are 0.04 thick
+    const sideGeo = new THREE.BoxGeometry(0.46, 0.22, 0.04);
+    const endGeo  = new THREE.BoxGeometry(0.04, 0.22, 0.34);
+    const baseGeo = new THREE.BoxGeometry(0.46, 0.04, 0.34);
+
+    // Per-resource detail builders. Each returns a Group with multiple small
+    // meshes arranged so the contents read clearly (carrot tops sticking up,
+    // tomatoes clustered, milk bottles upright with a paper label, etc.).
+    // Materials are cached per key so repeating the build doesn't allocate.
+    const mat = (color) => new THREE.MeshLambertMaterial({ color });
+    const mats = {
+      carrot:    mat(0xf08831),
+      carrotTop: mat(0x2e8b3d),
+      tomato:    mat(0xe04a3c),
+      tomatoLeaf: mat(0x2e8b3d),
+      potato:    mat(0xc49a5a),
+      potatoEye: mat(0x6f4a26),
+      bale:      mat(0xe2c35a),
+      baleString: mat(0x6a4628),
+      planks:    mat(0xb77842),
+      planksDark: mat(0x6a3f1a),
+      sauce:     mat(0xd02e2a),
+      sauceCap:  mat(0xfff7c4),
+      sauceLabel: mat(0xfff0a0),
+      chips:     mat(0xe6b548),
+      chipsBag:  mat(0xc84036),
+      egg:       mat(0xfaf2dc),
+      eggSpot:   mat(0xc89f6a),
+      milk:      mat(0xffffff),
+      milkCap:   mat(0xc84036),
+      milkLabel: mat(0x4fb6e8),
+      corn:      mat(0xf2c648),
+      cornHusk:  mat(0x5caa38),
+      wheat:     mat(0xe8c54a),
+      wheatStem: mat(0xbfa348),
+      grass:     mat(0x5bbf3d),
+      grassDark: mat(0x3aa030),
+      wood:      mat(0x8b5a2b),
+      woodDark:  mat(0x6a4628),
+    };
+
+    // Reusable primitive geometries — created once.
+    const prims = {
+      tinyBall: new THREE.SphereGeometry(0.10, 10, 8),
+      smallBall: new THREE.SphereGeometry(0.13, 10, 8),
+      tomato: new THREE.SphereGeometry(0.11, 10, 8),
+      potato: new THREE.SphereGeometry(0.10, 8, 6),
+      egg: (() => { const g = new THREE.SphereGeometry(0.08, 10, 8); g.scale(1, 1.3, 1); return g; })(),
+      carrotCone: (() => { const g = new THREE.ConeGeometry(0.06, 0.18, 7); g.rotateX(0); return g; })(),
+      carrotLeaf: new THREE.SphereGeometry(0.04, 6, 4),
+      bottle: (() => { const g = new THREE.CylinderGeometry(0.07, 0.085, 0.22, 10); return g; })(),
+      bottleNeck: new THREE.CylinderGeometry(0.04, 0.05, 0.06, 8),
+      bottleCap: new THREE.CylinderGeometry(0.05, 0.05, 0.04, 8),
+      label: new THREE.BoxGeometry(0.10, 0.10, 0.001),
+      bale: (() => { const g = new THREE.CylinderGeometry(0.16, 0.16, 0.34, 14); g.rotateZ(Math.PI / 2); return g; })(),
+      baleString: (() => { const g = new THREE.TorusGeometry(0.16, 0.012, 6, 14); return g; })(),
+      plank: new THREE.BoxGeometry(0.4, 0.04, 0.10),
+      cornCob: (() => { const g = new THREE.CylinderGeometry(0.06, 0.06, 0.20, 9); return g; })(),
+      cornHusk: (() => { const g = new THREE.ConeGeometry(0.07, 0.14, 6); g.rotateX(Math.PI); return g; })(),
+      wheatStalk: (() => { const g = new THREE.CylinderGeometry(0.025, 0.025, 0.26, 5); return g; })(),
+      wheatHead: (() => { const g = new THREE.CylinderGeometry(0.045, 0.025, 0.10, 6); return g; })(),
+      chipsBag: (() => { const g = new THREE.BoxGeometry(0.18, 0.20, 0.10); return g; })(),
+      chipsTop: (() => { const g = new THREE.BoxGeometry(0.16, 0.04, 0.10); return g; })(),
+      grassTuft: new THREE.IcosahedronGeometry(0.13, 0),
+      logSeg: (() => { const g = new THREE.CylinderGeometry(0.07, 0.07, 0.32, 8); g.rotateZ(Math.PI / 2); return g; })(),
+    };
+
+    // Detail builders — each returns a fresh Group sized to sit on top of
+    // the crate. Returned group's local origin is at the rim (y=0).
+    const builders = {
+      carrot: () => {
+        const g = new THREE.Group();
+        const positions = [[-0.13, 0.04], [0, 0.06], [0.13, 0.04],
+                           [-0.07, -0.06], [0.07, -0.06]];
+        for (const [x, z] of positions) {
+          const carrot = new THREE.Mesh(prims.carrotCone, mats.carrot);
+          carrot.position.set(x, 0.06, z);
+          g.add(carrot);
+          // Three little leaves at the top of each carrot
+          for (let l = 0; l < 3; l++) {
+            const leaf = new THREE.Mesh(prims.carrotLeaf, mats.carrotTop);
+            const ang = (l / 3) * Math.PI * 2;
+            leaf.position.set(x + Math.cos(ang) * 0.04, 0.18, z + Math.sin(ang) * 0.04);
+            g.add(leaf);
+          }
+        }
+        return g;
+      },
+      tomato: () => {
+        const g = new THREE.Group();
+        const positions = [[-0.10, -0.08], [0.10, -0.08], [0, 0.04],
+                           [-0.10, 0.08], [0.10, 0.08]];
+        for (const [x, z] of positions) {
+          const t = new THREE.Mesh(prims.tomato, mats.tomato);
+          t.position.set(x, 0.04, z);
+          g.add(t);
+          // Tiny green stem cap
+          const leaf = new THREE.Mesh(prims.carrotLeaf, mats.tomatoLeaf);
+          leaf.position.set(x, 0.13, z);
+          leaf.scale.set(1.2, 0.5, 1.2);
+          g.add(leaf);
+        }
+        return g;
+      },
+      potato: () => {
+        const g = new THREE.Group();
+        const positions = [[-0.12, -0.08], [0.10, -0.06], [-0.04, 0.06],
+                           [0.12, 0.08], [-0.10, 0.10]];
+        for (const [x, z] of positions) {
+          const p = new THREE.Mesh(prims.potato, mats.potato);
+          p.position.set(x, 0.03, z);
+          p.scale.set(1.3, 0.85, 1.0);
+          p.rotation.y = Math.random() * Math.PI;
+          g.add(p);
+          const eye = new THREE.Mesh(prims.carrotLeaf, mats.potatoEye);
+          eye.position.set(x + 0.02, 0.06, z);
+          eye.scale.setScalar(0.45);
+          g.add(eye);
+        }
+        return g;
+      },
+      bale: () => {
+        const g = new THREE.Group();
+        const bale = new THREE.Mesh(prims.bale, mats.bale);
+        bale.position.y = 0.10;
+        g.add(bale);
+        // Two darker baling strings wrapped around
+        const s1 = new THREE.Mesh(prims.baleString, mats.baleString);
+        s1.position.set(-0.08, 0.10, 0);
+        s1.rotation.y = Math.PI / 2;
+        g.add(s1);
+        const s2 = new THREE.Mesh(prims.baleString, mats.baleString);
+        s2.position.set(0.08, 0.10, 0);
+        s2.rotation.y = Math.PI / 2;
+        g.add(s2);
+        return g;
+      },
+      planks: () => {
+        const g = new THREE.Group();
+        for (let i = 0; i < 3; i++) {
+          const p = new THREE.Mesh(prims.plank, mats.planks);
+          p.position.set(0, 0.03 + i * 0.045, -0.10 + i * 0.10);
+          g.add(p);
+          // Dark grain stripe along each plank
+          const grain = new THREE.Mesh(prims.plank, mats.planksDark);
+          grain.position.copy(p.position);
+          grain.position.y += 0.022;
+          grain.scale.set(0.95, 0.2, 0.5);
+          g.add(grain);
+        }
+        return g;
+      },
+      sauce: () => {
+        const g = new THREE.Group();
+        const positions = [[-0.10, -0.05], [0.10, -0.05], [0, 0.07]];
+        for (const [x, z] of positions) {
+          const body = new THREE.Mesh(prims.bottle, mats.sauce);
+          body.position.set(x, 0.11, z);
+          g.add(body);
+          const neck = new THREE.Mesh(prims.bottleNeck, mats.sauce);
+          neck.position.set(x, 0.25, z);
+          g.add(neck);
+          const cap = new THREE.Mesh(prims.bottleCap, mats.sauceCap);
+          cap.position.set(x, 0.30, z);
+          g.add(cap);
+          // Yellow paper label wrapped around the bottle
+          const label = new THREE.Mesh(prims.label, mats.sauceLabel);
+          label.position.set(x, 0.10, z + 0.072);
+          g.add(label);
+        }
+        return g;
+      },
+      chips: () => {
+        const g = new THREE.Group();
+        for (let i = 0; i < 4; i++) {
+          const col = i % 2, row = Math.floor(i / 2);
+          const x = -0.08 + col * 0.16;
+          const z = -0.06 + row * 0.12;
+          const bag = new THREE.Mesh(prims.chipsBag, mats.chipsBag);
+          bag.position.set(x, 0.10, z);
+          g.add(bag);
+          // Yellow band across the middle (chips logo)
+          const band = new THREE.Mesh(prims.chipsTop, mats.chips);
+          band.position.set(x, 0.11, z);
+          band.scale.set(1, 0.5, 1.02);
+          g.add(band);
+        }
+        return g;
+      },
+      egg: () => {
+        const g = new THREE.Group();
+        const positions = [[-0.12, -0.08], [0, -0.08], [0.12, -0.08],
+                           [-0.12, 0.04], [0, 0.04], [0.12, 0.04]];
+        for (const [x, z] of positions) {
+          const e = new THREE.Mesh(prims.egg, mats.egg);
+          e.position.set(x, 0.06, z);
+          e.rotation.z = (Math.random() - 0.5) * 0.4;
+          g.add(e);
+        }
+        return g;
+      },
+      milk: () => {
+        const g = new THREE.Group();
+        const positions = [[-0.12, 0], [0, 0], [0.12, 0]];
+        for (const [x, z] of positions) {
+          const body = new THREE.Mesh(prims.bottle, mats.milk);
+          body.position.set(x, 0.11, z);
+          body.scale.set(1, 1.1, 1);
+          g.add(body);
+          const neck = new THREE.Mesh(prims.bottleNeck, mats.milk);
+          neck.position.set(x, 0.26, z);
+          g.add(neck);
+          const cap = new THREE.Mesh(prims.bottleCap, mats.milkCap);
+          cap.position.set(x, 0.31, z);
+          g.add(cap);
+          // Blue label
+          const label = new THREE.Mesh(prims.label, mats.milkLabel);
+          label.position.set(x, 0.10, z + 0.075);
+          g.add(label);
+        }
+        return g;
+      },
+      corn: () => {
+        const g = new THREE.Group();
+        const positions = [[-0.12, -0.06], [0.12, -0.06], [0, 0.06]];
+        for (const [x, z] of positions) {
+          const cob = new THREE.Mesh(prims.cornCob, mats.corn);
+          cob.position.set(x, 0.10, z);
+          cob.rotation.z = (Math.random() - 0.5) * 0.3;
+          g.add(cob);
+          const husk1 = new THREE.Mesh(prims.cornHusk, mats.cornHusk);
+          husk1.position.set(x - 0.04, 0.20, z);
+          husk1.rotation.z = -0.5;
+          g.add(husk1);
+          const husk2 = new THREE.Mesh(prims.cornHusk, mats.cornHusk);
+          husk2.position.set(x + 0.04, 0.20, z);
+          husk2.rotation.z = 0.5;
+          g.add(husk2);
+        }
+        return g;
+      },
+      wheat: () => {
+        const g = new THREE.Group();
+        for (let i = 0; i < 7; i++) {
+          const x = -0.13 + (i % 4) * 0.085;
+          const z = -0.06 + Math.floor(i / 4) * 0.10;
+          const stalk = new THREE.Mesh(prims.wheatStalk, mats.wheatStem);
+          stalk.position.set(x, 0.13, z);
+          stalk.rotation.z = (Math.random() - 0.5) * 0.2;
+          g.add(stalk);
+          const head = new THREE.Mesh(prims.wheatHead, mats.wheat);
+          head.position.set(x, 0.27, z);
+          g.add(head);
+        }
+        return g;
+      },
+      grass: () => {
+        const g = new THREE.Group();
+        const positions = [[-0.12, -0.08], [0.10, -0.08], [-0.05, 0.05],
+                           [0.12, 0.08], [-0.10, 0.10]];
+        for (const [x, z] of positions) {
+          const tuft = new THREE.Mesh(prims.grassTuft, mats.grass);
+          tuft.position.set(x, 0.07, z);
+          tuft.rotation.y = Math.random() * Math.PI;
+          tuft.scale.set(0.9, 1.1, 0.9);
+          g.add(tuft);
+          const dark = new THREE.Mesh(prims.grassTuft, mats.grassDark);
+          dark.position.set(x, 0.05, z);
+          dark.scale.setScalar(0.6);
+          g.add(dark);
+        }
+        return g;
+      },
+      wood: () => {
+        const g = new THREE.Group();
+        for (let i = 0; i < 3; i++) {
+          const log = new THREE.Mesh(prims.logSeg, mats.wood);
+          log.position.set(0, 0.07 + i * 0.10, -0.05 + (i % 2) * 0.10);
+          g.add(log);
+          // Dark end-cap rings
+          const cap = new THREE.Mesh(prims.logSeg, mats.woodDark);
+          cap.position.copy(log.position);
+          cap.scale.set(1.05, 0.15, 1.05);
+          g.add(cap);
+        }
+        return g;
+      },
+    };
+
+    this._crateProtos = { blue, blueDark, sideGeo, endGeo, baseGeo, builders };
+  }
+
+  _makeCrate(kind) {
+    this._ensureCratePrototypes();
+    const p = this._crateProtos;
+    const g = new THREE.Group();
+    // Bottom slab + 4 panels — the open crate body
+    const base = new THREE.Mesh(p.baseGeo, p.blueDark);
+    base.position.y = 0.02;
+    g.add(base);
+    const front = new THREE.Mesh(p.sideGeo, p.blue);
+    front.position.set(0, 0.13, 0.15);
+    g.add(front);
+    const back = new THREE.Mesh(p.sideGeo, p.blue);
+    back.position.set(0, 0.13, -0.15);
+    g.add(back);
+    const left = new THREE.Mesh(p.endGeo, p.blue);
+    left.position.set(-0.21, 0.13, 0);
+    g.add(left);
+    const right = new THREE.Mesh(p.endGeo, p.blue);
+    right.position.set(0.21, 0.13, 0);
+    g.add(right);
+    // Detailed contents arrangement on top of the crate
+    const builder = p.builders[kind] || p.builders.grass;
+    const contents = builder();
+    contents.position.y = 0.22; // sit just above the crate rim
+    g.add(contents);
+    g.userData.contents = contents;
+    g.userData.kind = kind;
+    return g;
+  }
+
+  // Back stack — vertical column of blue crates rising up the player's back.
+  // Caps grass (wood) into one crate per item per Klondike convention.
   _buildBackStack() {
     this.backStackGroup = new THREE.Group();
-    this.backStackGroup.position.set(0, 1.55, -0.5);
+    this.backStackGroup.position.set(0, 1.45, -0.42);
     this.bodyGroup.add(this.backStackGroup);
-
-    this.backStackMats = {
-      wood: new THREE.MeshLambertMaterial({ color: 0x8b5a2b }),
-      grass: new THREE.MeshLambertMaterial({ color: 0x5bbf3d }),
-    };
-    // Slightly rounded blocks for a less-blocky look
-    this.backStackGeo = new THREE.BoxGeometry(0.42, 0.22, 0.28);
-    this.backStackMeshes = [];
-
+    this.backStackCrates = [];
     Backpack.subscribe(() => this._updateBackStack());
     this._updateBackStack();
+  }
+
+  _swapCrateContents(crate, kind) {
+    if (crate.userData.kind === kind) return;
+    if (crate.userData.contents) {
+      crate.remove(crate.userData.contents);
+      crate.userData.contents = null;
+    }
+    const builder = this._crateProtos.builders[kind] || this._crateProtos.builders.grass;
+    const contents = builder();
+    contents.position.y = 0.22;
+    crate.add(contents);
+    crate.userData.contents = contents;
+    crate.userData.kind = kind;
   }
 
   _updateBackStack() {
@@ -207,47 +544,35 @@ export class Player {
     const sequence = [];
     for (let i = 0; i < (items.grass || 0); i++) sequence.push('grass');
     for (let i = 0; i < (items.wood || 0); i++) sequence.push('wood');
-    while (this.backStackMeshes.length < sequence.length) {
-      const m = new THREE.Mesh(this.backStackGeo, this.backStackMats.wood);
-      m.visible = false;
-      this.backStackGroup.add(m);
-      this.backStackMeshes.push(m);
+    // Expand pool
+    while (this.backStackCrates.length < sequence.length) {
+      const c = this._makeCrate('grass');
+      c.visible = false;
+      this.backStackGroup.add(c);
+      this.backStackCrates.push(c);
     }
-    for (let i = 0; i < this.backStackMeshes.length; i++) {
-      const mesh = this.backStackMeshes[i];
-      if (i >= sequence.length) { mesh.visible = false; continue; }
-      mesh.visible = true;
-      mesh.material = this.backStackMats[sequence[i]];
+    for (let i = 0; i < this.backStackCrates.length; i++) {
+      const crate = this.backStackCrates[i];
+      if (i >= sequence.length) { crate.visible = false; continue; }
+      crate.visible = true;
+      this._swapCrateContents(crate, sequence[i]);
       const layer = Math.floor(i / 2);
       const slot = i % 2;
-      const offsetX = slot === 0 ? -0.12 : 0.12;
-      const wobble = ((i * 37) % 9 - 4) * 0.01;
-      mesh.position.set(offsetX + wobble, layer * 0.2, 0);
-      mesh.rotation.z = wobble * 0.6;
+      const offsetX = slot === 0 ? -0.13 : 0.13;
+      const wobble = ((i * 37) % 9 - 4) * 0.008;
+      crate.position.set(offsetX + wobble, layer * 0.30, 0);
+      crate.rotation.z = wobble * 0.4;
     }
   }
 
-  // Front carry stack — rendered in front of the torso (like arms cradle it).
+  // Front carry — Klondike-style vertical column of blue crates cradled in
+  // front of the player. Each crate's filler shows the resource inside, so
+  // the same crate body is reused for every product type.
   _buildFrontCarry() {
     this.carryGroup = new THREE.Group();
-    // Slightly forward of torso, between the arms
-    this.carryGroup.position.set(0, 0.9, 0.38);
+    this.carryGroup.position.set(0, 0.7, 0.34);
     this.bodyGroup.add(this.carryGroup);
-
-    // Geometries + materials for each carried kind
-    this.carryKinds = {
-      bale:   { geo: new THREE.CylinderGeometry(0.22, 0.22, 0.36, 12), mat: new THREE.MeshLambertMaterial({ color: 0xe2c35a }), layerH: 0.22 },
-      planks: { geo: new THREE.BoxGeometry(0.52, 0.08, 0.18), mat: new THREE.MeshLambertMaterial({ color: 0xb77842 }), layerH: 0.12 },
-      tomato: { geo: new THREE.SphereGeometry(0.18, 10, 8), mat: new THREE.MeshLambertMaterial({ color: 0xe04a3c }), layerH: 0.18 },
-      potato: { geo: new THREE.SphereGeometry(0.16, 8, 6), mat: new THREE.MeshLambertMaterial({ color: 0xc49a5a }), layerH: 0.16 },
-      sauce:  { geo: new THREE.CylinderGeometry(0.11, 0.13, 0.32, 10), mat: new THREE.MeshLambertMaterial({ color: 0xd02e2a }), layerH: 0.32 },
-      chips:  { geo: new THREE.BoxGeometry(0.28, 0.22, 0.18), mat: new THREE.MeshLambertMaterial({ color: 0xe6b548 }), layerH: 0.22 },
-      egg:    { geo: new THREE.SphereGeometry(0.14, 10, 8),  mat: new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }), layerH: 0.2 },
-    };
-    this.carryKinds.bale.geo.rotateZ(Math.PI / 2);
-    this.carryKinds.egg.geo.scale(1, 1.25, 1);
-    this.carryMeshes = [];
-
+    this.carryCrates = [];
     PlayerCarry.subscribe(() => this._updateCarry());
     this._updateCarry();
   }
@@ -255,27 +580,23 @@ export class Player {
   _updateCarry() {
     const items = PlayerCarry.items;
     const seq = [];
-    for (const k of ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg']) {
+    for (const k of ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'milk', 'corn', 'wheat']) {
       for (let i = 0; i < (items[k] || 0); i++) seq.push(k);
     }
-    while (this.carryMeshes.length < seq.length) {
-      const m = new THREE.Mesh(this.carryKinds.bale.geo, this.carryKinds.bale.mat);
-      m.visible = false;
-      this.carryGroup.add(m);
-      this.carryMeshes.push(m);
+    while (this.carryCrates.length < seq.length) {
+      const c = this._makeCrate('bale');
+      c.visible = false;
+      this.carryGroup.add(c);
+      this.carryCrates.push(c);
     }
-    let y = 0;
-    for (let i = 0; i < this.carryMeshes.length; i++) {
-      const mesh = this.carryMeshes[i];
-      if (i >= seq.length) { mesh.visible = false; continue; }
-      mesh.visible = true;
-      const kind = this.carryKinds[seq[i]];
-      mesh.geometry = kind.geo;
-      mesh.material = kind.mat;
-      const wobble = ((i * 41) % 9 - 4) * 0.012;
-      mesh.position.set(wobble, y, 0);
-      mesh.rotation.z = wobble * 0.5;
-      y += kind.layerH;
+    for (let i = 0; i < this.carryCrates.length; i++) {
+      const crate = this.carryCrates[i];
+      if (i >= seq.length) { crate.visible = false; continue; }
+      crate.visible = true;
+      this._swapCrateContents(crate, seq[i]);
+      const wobble = ((i * 41) % 9 - 4) * 0.010;
+      crate.position.set(wobble, i * 0.30, 0);
+      crate.rotation.z = wobble * 0.4;
     }
   }
 

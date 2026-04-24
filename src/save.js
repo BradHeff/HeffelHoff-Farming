@@ -66,6 +66,7 @@ export function serializeGame(game) {
       coinsEarned: game._lifetimeCoinsEarned || 0,
       sold: { ...(game._lifetimeSold || {}) },
       collected: { ...(game._lifetimeCollected || {}) },
+      produced: { ...(game._lifetimeProduced || {}) },
       slashed: { ...(game._countSlashed || {}) },
       traderCompleted: game._traderCompleted || 0,
     },
@@ -173,12 +174,20 @@ export function applySave(game, state) {
   if (state.buildingWorkers) {
     for (const key of state.buildingWorkers) {
       game.helpers.hireBuildingWorker(key);
+      // Mark the corresponding hire tile as already hired so it doesn't
+      // re-offer the player a paid hire — that was spawning duplicate
+      // workers per building on every resume.
+      const tile = game.buildingHires?.tiles?.[key];
+      if (tile) { tile.hired = true; tile.setActive?.(false); }
     }
   }
   if (state.farmWorkers) {
     for (const idx of state.farmWorkers) {
       const farm = game.farms[idx];
       if (farm) game.helpers.hireFarmWorker(farm);
+      // Same for farm hire tiles
+      const tile = game.farmHires?.tiles?.[idx];
+      if (tile) { tile.hired = true; tile.setActive?.(false); }
     }
   }
   // Lifetime counters
@@ -186,11 +195,16 @@ export function applySave(game, state) {
     game._lifetimeCoinsEarned = state.lifetime.coinsEarned || 0;
     game._lifetimeSold = { ...(state.lifetime.sold || {}) };
     game._lifetimeCollected = { ...(state.lifetime.collected || {}) };
+    game._lifetimeProduced = { ...(state.lifetime.produced || {}) };
     game._countSlashed = { tree: 0, grass: 0, crop: 0, ...(state.lifetime.slashed || {}) };
     game._traderCompleted = state.lifetime.traderCompleted || 0;
   }
   if (state.goals && game.goals) {
-    game.goals.update();
+    // Skip past every goal that's already been completed in prior sessions
+    // WITHOUT firing banners/toasts/XP grants. UserLevel was restored above,
+    // so re-granting would double-credit AND flood the screen with banners
+    // for several seconds while the chain caught up.
+    game.goals.silentCatchUp();
   }
 }
 

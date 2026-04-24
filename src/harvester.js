@@ -459,36 +459,40 @@ export class HarvesterUnlockTile {
     this._t = 0;
   }
 
+  // Unlock-eligible as soon as ONE main building hits Lv3 — same easier
+  // gate as the standalone tractor. The preview crew is always visible
+  // (handled in update()) so its silhouette teases the unlock from the
+  // start instead of appearing only after the player finishes the chain.
   _prereqMet() {
-    if (UserLevel.level < this.cfg.minUserLevel) return false;
     for (const k of this.cfg.requiredL3) {
       const s = this.buildManager.sites[k];
-      if (!s || !s.completed || (s.level || 1) < 3) return false;
+      if (s && s.completed && (s.level || 1) >= 3) return true;
     }
-    return true;
+    return false;
   }
 
   update(dt, player, particles) {
     if (this.unlocked) return;
     this._t += dt;
+    if (!this._previewShown) {
+      this._previewShown = true;
+      this.previewH.visible = true;
+      this.previewT.visible = true;
+      this.pulse.visible = true;
+      this.decal.mesh.visible = true;
+    }
     const ready = this._prereqMet();
     if (ready !== this.revealed) {
       this.revealed = ready;
-      this.previewH.visible = ready;
-      this.previewT.visible = ready;
-      this.pulse.visible = ready;
-      this.decal.mesh.visible = ready;
-    }
-    if (!ready) {
-      this.card.style.display = 'none';
-      return;
+      this.pulse.material.opacity = ready ? 0.5 : 0.2;
     }
     const k = (Math.sin(this._t * 2.2) + 1) * 0.5;
     this.pulse.scale.setScalar(0.95 + k * 0.22);
-    this.pulse.material.opacity = 0.3 + k * 0.35;
+    if (ready) this.pulse.material.opacity = 0.3 + k * 0.35;
     this.previewH.position.y = Math.sin(this._t * 1.8) * 0.1;
     this.previewT.position.y = Math.sin(this._t * 2.1 + 1) * 0.1;
     this.decal.update(dt);
+    if (!ready) { this.card.style.display = 'none'; return; }
 
     const dpx = player.group.position.x - (this.position.x + 1.4);
     const dpz = player.group.position.z - (this.position.z + 3.2);

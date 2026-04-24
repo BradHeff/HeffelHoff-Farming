@@ -425,40 +425,51 @@ export class TractorUnlockTile {
     this._t = 0;
   }
 
+  // Unlock now requires only ONE main building at Level 3 — simpler gate
+  // so the player isn't waiting an entire endgame upgrade chain to see
+  // the unlock light up. The preview tractor is ALWAYS visible (handled
+  // in update()) so the silhouette teases progression from the start.
   _prereqMet() {
-    if (HelperStats.level < 2) return false;
     for (const k of this.cfg.requiredL3) {
       const s = this.buildManager.sites[k];
-      if (!s || !s.completed || (s.level || 1) < 3) return false;
+      if (s && s.completed && (s.level || 1) >= 3) return true;
     }
-    return true;
+    return false;
   }
 
   update(dt, player, particles) {
     if (this.unlocked) return;
     this._t += dt;
+    // Preview tractor + ring are always visible; pulse + decal only highlight
+    // once at least one factory is Lv3. This way the tractor isn't hidden
+    // behind a wall of greenery until late game.
     const ready = this._prereqMet();
+    if (!this._previewShown) {
+      this._previewShown = true;
+      this.previewGroup.visible = true;
+      this.pulse.visible = true;
+      this.ring.visible = true;
+      this.decal.mesh.visible = true;
+    }
     if (ready !== this.revealed) {
       this.revealed = ready;
-      this.previewGroup.visible = ready;
-      this.pulse.visible = ready;
-      this.ring.visible = ready;
-      this.decal.mesh.visible = ready;
-    }
-    if (!ready) {
-      this.card.style.display = 'none';
-      return;
+      // Subtle visual cue: dim the ring + pulse when not yet eligible
+      this.pulse.material.opacity = ready ? 0.5 : 0.2;
+      this.ring.material.opacity = ready ? 0.85 : 0.4;
     }
 
-    // Pulse + shimmer
+    // Pulse + shimmer (animation only fires once eligible)
     const k = (Math.sin(this._t * 2.4) + 1) * 0.5;
     this.pulse.scale.setScalar(0.9 + k * 0.25);
-    this.pulse.material.opacity = 0.2 + k * 0.3;
+    if (ready) this.pulse.material.opacity = 0.2 + k * 0.3;
     this.ring.scale.setScalar(1.0 + k * 0.3);
-    this.ring.material.opacity = 0.4 + (1 - k) * 0.5;
+    if (ready) this.ring.material.opacity = 0.4 + (1 - k) * 0.5;
     this.previewGroup.position.y = Math.sin(this._t * 2.0) * 0.12;
     this.previewGroup.rotation.y = Math.sin(this._t * 0.6) * 0.3;
     this.decal.update(dt);
+
+    // Don't allow purchase / sparkles until at least one Lv3 building
+    if (!ready) { this.card.style.display = 'none'; return; }
 
     // Sparkle particles occasionally
     if (particles && Math.random() < 0.05) {

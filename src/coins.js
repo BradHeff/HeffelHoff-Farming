@@ -30,25 +30,86 @@ export class CoinPile {
     const trayW = this.cols * cellW + 0.4;
     const trayD = this.rows * cellD + 0.4;
 
-    // Rectangular wooden tray
-    const trayBase = new THREE.Mesh(
-      new THREE.BoxGeometry(trayW, 0.08, trayD),
-      new THREE.MeshLambertMaterial({ color: 0xc78b4a })
+    // Stylish money safe — green velvet base, gold-trimmed rim, brass corner
+    // studs, and a wide cream "MONEY" plaque on the front skirt. Replaces
+    // the plain wooden tray that read as drab next to the candy palette.
+    const skirt = new THREE.Mesh(
+      new THREE.BoxGeometry(trayW + 0.4, 0.36, trayD + 0.4),
+      new THREE.MeshLambertMaterial({ color: 0x2c7d3a })   // dark velvet green
     );
-    trayBase.position.y = 0.04;
+    skirt.position.y = 0.18;
+    this.group.add(skirt);
+    // Cream tray base — money sits here
+    const trayBase = new THREE.Mesh(
+      new THREE.BoxGeometry(trayW, 0.06, trayD),
+      new THREE.MeshLambertMaterial({ color: 0xfff3d3 })
+    );
+    trayBase.position.y = 0.39;
     this.group.add(trayBase);
-    const rim = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
-    const rimH = 0.1;
-    const rimT = 0.08;
+    // Gold rim around the tray edge
+    const rimMat = new THREE.MeshLambertMaterial({ color: 0xf2c14a });
+    const rimAccent = new THREE.MeshLambertMaterial({ color: 0xb8862e });
+    const rimH = 0.08;
+    const rimT = 0.10;
+    const yRim = 0.42;
     const addRim = (w, d, x, z) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, rimH, d), rim);
-      m.position.set(x, 0.08 + rimH / 2, z);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, rimH, d), rimMat);
+      m.position.set(x, yRim, z);
       this.group.add(m);
     };
-    addRim(trayW, rimT, 0, -trayD / 2 + rimT / 2);
-    addRim(trayW, rimT, 0,  trayD / 2 - rimT / 2);
-    addRim(rimT, trayD, -trayW / 2 + rimT / 2, 0);
-    addRim(rimT, trayD,  trayW / 2 - rimT / 2, 0);
+    addRim(trayW + 0.18, rimT, 0, -trayD / 2 + rimT / 2);
+    addRim(trayW + 0.18, rimT, 0,  trayD / 2 - rimT / 2);
+    addRim(rimT, trayD + 0.18, -trayW / 2 + rimT / 2, 0);
+    addRim(rimT, trayD + 0.18,  trayW / 2 - rimT / 2, 0);
+    // Brass corner studs — half-spheres on each rim corner for jewelry feel
+    const studGeo = new THREE.SphereGeometry(0.10, 10, 8);
+    for (const cx of [-trayW / 2, trayW / 2]) {
+      for (const cz of [-trayD / 2, trayD / 2]) {
+        const stud = new THREE.Mesh(studGeo, rimAccent);
+        stud.position.set(cx, yRim + 0.05, cz);
+        this.group.add(stud);
+      }
+    }
+    // Cream "$" plaque on the front skirt
+    const plaque = new THREE.Mesh(
+      new THREE.BoxGeometry(trayW * 0.55, 0.16, 0.04),
+      new THREE.MeshLambertMaterial({ color: 0xfff7c4 })
+    );
+    plaque.position.set(0, 0.18, trayD / 2 + 0.22);
+    this.group.add(plaque);
+    const plaqueRim = new THREE.Mesh(
+      new THREE.BoxGeometry(trayW * 0.6, 0.20, 0.02),
+      rimAccent
+    );
+    plaqueRim.position.set(0, 0.18, trayD / 2 + 0.215);
+    this.group.add(plaqueRim);
+    // Embossed dollar sign — three small gold cylinders forming "$"
+    const sShape = (offsetX) => {
+      const dollar = new THREE.Group();
+      const stem = new THREE.Mesh(
+        new THREE.BoxGeometry(0.025, 0.13, 0.02),
+        rimAccent
+      );
+      stem.position.set(offsetX, 0.18, trayD / 2 + 0.245);
+      this.group.add(stem);
+      const top = new THREE.Mesh(
+        new THREE.TorusGeometry(0.045, 0.018, 6, 12, Math.PI),
+        rimAccent
+      );
+      top.position.set(offsetX, 0.215, trayD / 2 + 0.245);
+      top.rotation.x = -Math.PI / 2;
+      this.group.add(top);
+      const bot = new THREE.Mesh(
+        new THREE.TorusGeometry(0.045, 0.018, 6, 12, Math.PI),
+        rimAccent
+      );
+      bot.position.set(offsetX, 0.145, trayD / 2 + 0.245);
+      bot.rotation.x = Math.PI / 2;
+      bot.rotation.z = Math.PI;
+      this.group.add(bot);
+      void dollar;
+    };
+    sShape(0);
 
     // Pre-computed local positions per slot (cell * perStack)
     this.slots = new Array(this.total);
@@ -58,7 +119,7 @@ export class CoinPile {
       const x = (col - (this.cols - 1) / 2) * cellW;
       const z = (row - (this.rows - 1) / 2) * cellD;
       for (let k = 0; k < this.perStack; k++) {
-        this.slots[i * this.perStack + k] = { x, y: 0.12 + k * 0.07, z };
+        this.slots[i * this.perStack + k] = { x, y: 0.46 + k * 0.07, z };
       }
     }
 
@@ -91,13 +152,34 @@ export class CoinPile {
     this._t = 0;
     this._splashed = false;
 
-    // Pool of small coin meshes used for the splash-to-player flight anim.
+    // Klondike-style flight pool — mix of fat gold coins and rectangular
+    // green cash bills. Cash bills are clearly readable from a distance and
+    // give the pickup the "money exploding from the till" vibe from the
+    // reference screenshots.
     this._flyPool = [];
     this._flyActive = [];
-    const flyGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.07, 10);
-    const flyMat = new THREE.MeshLambertMaterial({ color: 0xffd04a });
-    for (let i = 0; i < 20; i++) {
-      const m = new THREE.Mesh(flyGeo, flyMat);
+    const coinFlyGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.07, 14);
+    const coinFlyMat = new THREE.MeshLambertMaterial({ color: 0xffd04a });
+    const billGeo = new THREE.BoxGeometry(0.34, 0.02, 0.20);
+    const billMat = new THREE.MeshLambertMaterial({ color: 0x46c455 });
+    const billStripeGeo = new THREE.BoxGeometry(0.10, 0.025, 0.08);
+    const billStripeMat = new THREE.MeshLambertMaterial({ color: 0xfff7c4 });
+    const POOL = 30;
+    for (let i = 0; i < POOL; i++) {
+      const isBill = i % 2 === 0;
+      let m;
+      if (isBill) {
+        m = new THREE.Group();
+        const card = new THREE.Mesh(billGeo, billMat);
+        m.add(card);
+        const stripe = new THREE.Mesh(billStripeGeo, billStripeMat);
+        stripe.position.y = 0.015;
+        m.add(stripe);
+        m.userData.kind = 'bill';
+      } else {
+        m = new THREE.Mesh(coinFlyGeo, coinFlyMat);
+        m.userData.kind = 'coin';
+      }
       m.visible = false;
       scene.add(m);
       this._flyPool.push(m);
@@ -169,30 +251,41 @@ export class CoinPile {
     Inventory.add('coin', total);
     this.pending = 0;
 
+    // Use up to the entire pool — bigger explosions for bigger payouts.
     const flights = Math.min(total, this._flyPool.length);
     for (let i = 0; i < flights; i++) {
       const m = this._flyPool.pop();
       if (!m) break;
-      const slot = this.slots[Math.min(i, this.slots.length - 1)];
-      const wp = this.group.localToWorld(new THREE.Vector3(slot.x, slot.y + 0.2, slot.z));
-      m.position.copy(wp);
+      // Start each piece with a big upward burst from the tray center,
+      // not from individual slots — looks like the till exploded open.
+      const cx = this.origin.x + (Math.random() - 0.5) * 0.4;
+      const cz = this.origin.z + (Math.random() - 0.5) * 0.4;
+      const cy = 0.6 + Math.random() * 0.3;
+      m.position.set(cx, cy, cz);
+      // Random initial outward velocity for a fountain pop
+      const ang = Math.random() * Math.PI * 2;
+      const speed = 2.6 + Math.random() * 2.0;
+      m.userData.vx = Math.cos(ang) * speed;
+      m.userData.vy = 4.5 + Math.random() * 2.5;
+      m.userData.vz = Math.sin(ang) * speed;
+      m.userData.phase = 'fountain';
+      m.userData.phaseT = 0;
       m.visible = true;
       this._flyActive.push({
         mesh: m,
         t: 0,
-        ttl: 0.42 + Math.random() * 0.12,
-        start: wp.clone(),
-        // Stagger starts so they form a trail, not a single pop
-        delay: i * 0.03,
-        spin: (Math.random() - 0.5) * 18,
+        ttl: 1.1 + Math.random() * 0.2,
+        delay: i * 0.018,
+        spin: (Math.random() - 0.5) * 14,
+        spinX: (Math.random() - 0.5) * 10,
         player,
       });
     }
     if (floaters) {
       floaters.spawn(
-        { x: this.origin.x, y: 2.0, z: this.origin.z },
+        { x: this.origin.x, y: 2.4, z: this.origin.z },
         `+${total} ${RES_ICONS?.coin || '🪙'}`,
-        { cls: 'gain', ttl: 1.1, vy: 2.2 }
+        { cls: 'gain', ttl: 1.4, vy: 2.6 }
       );
     }
     this._refresh();
@@ -200,27 +293,47 @@ export class CoinPile {
 
   _tickFlights(dt, player) {
     if (this._flyActive.length === 0) return;
+    const G = -14;  // gravity for the fountain phase
     for (let i = this._flyActive.length - 1; i >= 0; i--) {
       const f = this._flyActive[i];
       if (f.delay > 0) { f.delay -= dt; continue; }
       f.t += dt;
-      const k = Math.min(1, f.t / f.ttl);
-      // Player's current coin tower anchor
-      const targ = player.group.position;
-      const tx = targ.x, ty = 2.3, tz = targ.z;
-      const sx = f.start.x, sy = f.start.y, sz = f.start.z;
-      // Parabolic lerp with extra rise
-      const arc = Math.sin(k * Math.PI) * 0.8;
-      f.mesh.position.x = sx + (tx - sx) * k;
-      f.mesh.position.y = sy + (ty - sy) * k + arc;
-      f.mesh.position.z = sz + (tz - sz) * k;
-      f.mesh.rotation.y += f.spin * dt;
-      f.mesh.rotation.x += f.spin * 0.6 * dt;
-      if (k >= 1) {
-        f.mesh.visible = false;
-        this._flyPool.push(f.mesh);
-        this._flyActive.splice(i, 1);
+      const m = f.mesh;
+      const ud = m.userData;
+      ud.phaseT += dt;
+
+      if (ud.phase === 'fountain') {
+        // Fountain pop — physics integrate v + gravity for a beat.
+        m.position.x += ud.vx * dt;
+        m.position.y += ud.vy * dt;
+        m.position.z += ud.vz * dt;
+        ud.vy += G * dt;
+        if (ud.phaseT > 0.32) {
+          ud.phase = 'home';
+          ud.phaseT = 0;
+          ud.homeStart = m.position.clone();
+          ud.homeDur = 0.55 + Math.random() * 0.18;
+        }
+      } else if (ud.phase === 'home') {
+        // Sweep toward the player with a parabolic arc.
+        const k = Math.min(1, ud.phaseT / ud.homeDur);
+        const targ = player.group.position;
+        const tx = targ.x, ty = 2.3, tz = targ.z;
+        const sx = ud.homeStart.x, sy = ud.homeStart.y, sz = ud.homeStart.z;
+        const ease = 1 - (1 - k) * (1 - k);  // ease-out
+        const arc = Math.sin(k * Math.PI) * 1.1;
+        m.position.x = sx + (tx - sx) * ease;
+        m.position.y = sy + (ty - sy) * ease + arc;
+        m.position.z = sz + (tz - sz) * ease;
+        if (k >= 1) {
+          m.visible = false;
+          this._flyPool.push(m);
+          this._flyActive.splice(i, 1);
+          continue;
+        }
       }
+      m.rotation.y += f.spin * dt;
+      m.rotation.x += f.spinX * dt;
     }
   }
 }

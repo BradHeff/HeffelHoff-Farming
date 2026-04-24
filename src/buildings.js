@@ -996,67 +996,38 @@ export class BuildSite {
     if (this.key === 'hayBaler') {
       this._buildHayBalerMesh(g, lvl);
     } else if (this.key === 'market') {
-      // Market stall with striped awning + FRONT counter table
-      const counter = new THREE.Mesh(
-        new THREE.BoxGeometry(3.2, 1.0, 1.2),
-        new THREE.MeshLambertMaterial({ color: 0xf0d4a0 })
+      // Klondike-style sell table — no awning, no posts, no roof. Just the
+      // long red-cloth-skirted table with a sky-blue trough on top where
+      // crates of product sit. Crates display directly on the trough; the
+      // floating stock pills above the table have been removed in favor of
+      // the visible crate stacks themselves.
+      const skirt = new THREE.Mesh(
+        new THREE.BoxGeometry(3.2, 0.9, 1.0),
+        new THREE.MeshLambertMaterial({ color: 0xc84036 })   // vermilion skirt
       );
-      counter.position.set(0, 0.5, -0.7);
-      g.add(counter);
-      const postMat = new THREE.MeshLambertMaterial({ color: 0x7a4a2a });
-      for (const x of [-1.5, 1.5]) {
-        for (const z of [-1.2, 0.2]) {
-          const p = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.2, 10), postMat);
-          p.position.set(x, 1.1, z);
-          g.add(p);
-        }
-      }
-      // Big striped awning, tilted forward so it's the stall's defining
-      // silhouette from game-camera angle. White + deep-green ticking stripes
-      // match the reference painted-awning look.
-      const awningGroup = new THREE.Group();
-      const stripeCount = 6;
-      const stripeW = 4.0;
-      const stripeD = 0.44;
-      for (let i = 0; i < stripeCount; i++) {
-        const color = i % 2 === 0 ? 0xffffff : 0x2aa55a;
-        const stripe = new THREE.Mesh(
-          new THREE.BoxGeometry(stripeW, 0.08, stripeD),
-          new THREE.MeshLambertMaterial({ color })
-        );
-        stripe.position.set(
-          0,
-          i * 0.05,                         // subtle stepped shingle feel
-          -stripeD * (stripeCount - 1) / 2 + i * stripeD,
-        );
-        awningGroup.add(stripe);
-      }
-      awningGroup.position.set(0, 2.45, -0.15);
-      awningGroup.rotation.x = -0.22; // forward tilt — eaves drop toward player
-      g.add(awningGroup);
-
-      // Scalloped fringe at the front edge of the awning for character
-      const fringeMat = new THREE.MeshLambertMaterial({ color: 0x2aa55a });
-      const fringeGeo = new THREE.ConeGeometry(0.16, 0.22, 3);
-      fringeGeo.rotateX(Math.PI);
-      for (let i = 0; i < 9; i++) {
-        const c = new THREE.Mesh(fringeGeo, fringeMat);
-        c.position.set(-1.9 + i * 0.475, 2.15, 1.0);
-        c.rotation.y = Math.PI / 6;
-        g.add(c);
-      }
-      // Counter TABLE at the player-facing front (south of stall)
-      const tableTop = new THREE.Mesh(
-        new THREE.BoxGeometry(3.0, 0.12, 1.0),
-        new THREE.MeshLambertMaterial({ color: 0xc08a55 })
+      skirt.position.set(0, 0.45, -1.7);
+      g.add(skirt);
+      // Skirt trim — darker red rim along the bottom
+      const skirtTrim = new THREE.Mesh(
+        new THREE.BoxGeometry(3.3, 0.10, 1.05),
+        new THREE.MeshLambertMaterial({ color: 0x7d1a13 })
       );
-      tableTop.position.set(0, 0.95, -1.7);
-      const tableEdge = new THREE.Mesh(
-        new THREE.BoxGeometry(3.1, 0.06, 1.04),
-        new THREE.MeshLambertMaterial({ color: 0x6a3f1a })
+      skirtTrim.position.set(0, 0.05, -1.7);
+      g.add(skirtTrim);
+      // Sky-blue trough top — the visible "selling surface"
+      const trough = new THREE.Mesh(
+        new THREE.BoxGeometry(3.05, 0.18, 0.92),
+        new THREE.MeshLambertMaterial({ color: 0x4fb6e8 })
       );
-      tableEdge.position.set(0, 1.02, -1.7);
-      g.add(tableTop, tableEdge);
+      trough.position.set(0, 0.94, -1.7);
+      g.add(trough);
+      // Trough rim — slightly darker blue lip running around the edge
+      const troughRim = new THREE.Mesh(
+        new THREE.BoxGeometry(3.15, 0.06, 1.0),
+        new THREE.MeshLambertMaterial({ color: 0x2a7eb0 })
+      );
+      troughRim.position.set(0, 1.04, -1.7);
+      g.add(troughRim);
       // Remember slot positions in world space for offload targets
       const slots = [];
       for (let i = 0; i < 6; i++) {

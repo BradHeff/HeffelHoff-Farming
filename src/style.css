@@ -588,6 +588,83 @@ body {
 .hud-btn:active { transform: translateY(1px); }
 .hud-btn:disabled { opacity: 0.5; }
 
+/* Floating gear button — bottom-right corner, anchored above the Hire
+ * button + coin pill so it never overlaps the resource counter row at the
+ * top of the screen. */
+.settings-btn {
+  position: fixed;
+  right: 14px;
+  bottom: 200px;     /* clears Hire button + coin pill in #hud-side */
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid #ffffff60;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+  pointer-events: auto;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  touch-action: manipulation;
+}
+.settings-btn:active { transform: scale(0.92); }
+
+/* Modal overlay — hidden until .open is added */
+.settings-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  pointer-events: auto;
+}
+.settings-modal.open { display: flex; }
+.settings-modal .settings-panel {
+  background: linear-gradient(180deg, #fff8e7, #fce8b5);
+  border: 3px solid #b8862e;
+  border-radius: 18px;
+  padding: 24px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 260px;
+  max-width: 320px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+}
+.settings-modal .settings-title {
+  font-size: 22px;
+  font-weight: 900;
+  color: #6a3f0f;
+  text-align: center;
+  margin-bottom: 6px;
+}
+.settings-btn-large {
+  padding: 14px 16px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(180deg, #4fb6e8, #2a86b8);
+  border: 2px solid #1a608a;
+  border-radius: 12px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.settings-btn-large:active { transform: translateY(1px); }
+.settings-btn-large.danger {
+  background: linear-gradient(180deg, #e85a4f, #b8342a);
+  border-color: #7d1a13;
+}
+.settings-btn-large.secondary {
+  background: linear-gradient(180deg, #d8d8dc, #a0a0a8);
+  border-color: #707078;
+  color: #2a2a2e;
+}
+
 #joystick-zone {
   position: relative;
   width: 180px;

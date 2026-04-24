@@ -24,15 +24,124 @@ export class World {
     this.grassInstanceMesh = null; // InstancedMesh for grass
     this._buildGround();
     this._buildBiomeOverlays();
+    // Wide warm-sand courtyards UNDER the build row + market + customer
+    // queue — gives the Klondike "buildings sit on dirt, not on grass" look.
+    this._buildCourtyards();
     // Dirt paths go on after biome overlays so they render above them.
     buildPaths(this.scene);
     this._buildGrassCarpet();
+    this._buildFlowerDecals();   // scattered white 4-petal flowers on grass
     this._buildForest();
     this._buildExpansionBiome(); // initially locked — slash ignores these
     this._buildExpansionGate();  // physical wall + sign across expansion line
     this._buildPerimeter();
     this._buildDistantHills();   // dimmed landscape around the map edge
     populateDecorations(this.scene, this.rand);
+  }
+
+  // Two big rounded sand-coloured rectangles painted on the ground: one
+  // wraps the build row + market, one wraps the customer queue road.
+  // Buildings render on top, giving the Klondike "courtyard" look.
+  _buildCourtyards() {
+    const cdtex = (w, h, fill, edge) => {
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = Math.round(256 * h / w);
+      const ctx = c.getContext('2d');
+      const cw = c.width, ch = c.height;
+      ctx.clearRect(0, 0, cw, ch);
+      const r = Math.min(cw, ch) * 0.18;
+      const path = (x, y, rw, rh, rr) => {
+        ctx.beginPath();
+        ctx.moveTo(x + rr, y);
+        ctx.lineTo(x + rw - rr, y);
+        ctx.quadraticCurveTo(x + rw, y, x + rw, y + rr);
+        ctx.lineTo(x + rw, y + rh - rr);
+        ctx.quadraticCurveTo(x + rw, y + rh, x + rw - rr, y + rh);
+        ctx.lineTo(x + rr, y + rh);
+        ctx.quadraticCurveTo(x, y + rh, x, y + rh - rr);
+        ctx.lineTo(x, y + rr);
+        ctx.quadraticCurveTo(x, y, x + rr, y);
+        ctx.closePath();
+      };
+      ctx.fillStyle = '#' + fill.toString(16).padStart(6, '0');
+      path(2, 2, cw - 4, ch - 4, r);
+      ctx.fill();
+      ctx.strokeStyle = '#' + edge.toString(16).padStart(6, '0');
+      ctx.lineWidth = Math.max(3, Math.round(cw * 0.012));
+      ctx.stroke();
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 4;
+      return t;
+    };
+
+    const placeApron = (cx, cz, w, d) => {
+      const tex = cdtex(w, d, CONFIG.colors.courtyard, CONFIG.colors.courtyardEdge);
+      const geo = new THREE.PlaneGeometry(w, d);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        map: tex, transparent: true, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -1.5, polygonOffsetUnits: -1.5,
+      });
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(cx, 0.02, cz);
+      m.renderOrder = 1;
+      this.scene.add(m);
+    };
+
+    // Build-row apron — covers the whole row of factories + spawn area
+    placeApron(0, 4, 44, 14);
+    // Market + customer queue apron — on the road south of spawn
+    placeApron(0, 16, 30, 8);
+  }
+
+  // Tiny white 4-petal flower sprites scattered on the meadow — the
+  // Klondike grass texture has these everywhere and they're what makes the
+  // green plane feel alive instead of monotone.
+  _buildFlowerDecals() {
+    const { meadow } = CONFIG.world;
+    const count = 220;
+    const c = document.createElement('canvas');
+    c.width = c.height = 32;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, 32, 32);
+    ctx.fillStyle = '#ffffff';
+    // four-petal cross
+    const petal = (cx, cy, w, h) => {
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, w, h, 0, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    petal(16, 9,  3.2, 5.5);
+    petal(16, 23, 3.2, 5.5);
+    petal(9,  16, 5.5, 3.2);
+    petal(23, 16, 5.5, 3.2);
+    ctx.fillStyle = '#ffe66a';
+    ctx.beginPath(); ctx.arc(16, 16, 2.3, 0, Math.PI * 2); ctx.fill();
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const geo = new THREE.PlaneGeometry(0.55, 0.55);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    });
+    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    mesh.renderOrder = 3;
+    let placed = 0;
+    for (let i = 0; i < count * 3 && placed < count; i++) {
+      const x = meadow.minX + this.rand() * (meadow.maxX - meadow.minX);
+      const z = meadow.minZ + this.rand() * (meadow.maxZ - meadow.minZ);
+      if (this._isReserved(x, z)) continue;
+      const s = 0.7 + this.rand() * 0.7;
+      _m.makeScale(s, 1, s);
+      _m.setPosition(x, 0.04, z);
+      mesh.setMatrixAt(placed++, _m);
+    }
+    // Zero-out unused slots
+    for (let i = placed; i < count; i++) mesh.setMatrixAt(i, _zero);
+    mesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(mesh);
   }
 
   // Build a visible wooden fence line across the expansion boundary. While
@@ -251,6 +360,10 @@ export class World {
       { x: CONFIG.upgradePlots[1].x, z: CONFIG.upgradePlots[1].z, r: 1.8 },
       // Expansion tile — player needs clean ground to walk to it
       { x: ex.tilePos.x, z: ex.tilePos.z, r: 2.4 },
+      // Tractor + harvester unlock pads — keep grass/trees from blocking the
+      // preview silhouettes that should be visible from spawn.
+      { x: CONFIG.tractor.unlockPos.x,   z: CONFIG.tractor.unlockPos.z,   r: 4.5 },
+      { x: CONFIG.harvester.unlockPos.x, z: CONFIG.harvester.unlockPos.z, r: 4.5 },
     ];
     // Every farm plot: cover the whole rectangle with a circle big enough to
     // span the diagonal + a 1.5u buffer so trees/grass never spawn over crops.

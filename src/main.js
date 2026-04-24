@@ -48,11 +48,13 @@ class Game {
     // 5s TDR watchdog. Removed for now; draw distance is capped by the
     // camera far plane instead.
 
-    // Punchier lighting — warm sun + cool ground bounce gives chibi models
-    // a candy-bright shaded look instead of flat-green washed-out tones.
-    const hemi = new THREE.HemisphereLight(0xfff4dc, 0x2e7d33, 0.85);
+    // Klondike-style flat-clay lighting: bright neutral fill from above,
+    // warm-sand bounce from below (NOT green — that was tinting everything
+    // olive). Directional sun is soft so colors stay flat-vivid like the
+    // reference.
+    const hemi = new THREE.HemisphereLight(0xfffae8, 0xe2c48b, 1.05);
     this.scene.add(hemi);
-    const dir = new THREE.DirectionalLight(0xfff1c8, 1.15);
+    const dir = new THREE.DirectionalLight(0xfff1c8, 0.85);
     dir.position.set(20, 35, 10);
     this.scene.add(dir);
 
@@ -98,16 +100,28 @@ class Game {
     this._countSlashed = { tree: 0, grass: 0, crop: 0 };
     this._lifetimeCollected = {};
     this._lifetimeSold = {};
+    this._lifetimeProduced = {};   // bumped via Inventory deltas (sees worker deposits too)
     this._lifetimeCoinsEarned = 0;
     this._traderCompleted = 0;
-    // Watch Inventory.coin for increments to aggregate lifetime earnings
-    this._lastCoinSeen = 0;
+    // Watch Inventory for ALL positive deltas. Coins → lifetimeCoinsEarned.
+    // Other resource keys → lifetimeProduced[key]. This catches both player
+    // deposits AND worker deposits (workers bypass pickups.onLand entirely),
+    // so goals like "Collect 30 Planks" become attainable even when a hired
+    // BuildingWorker is intercepting every plank from the saw mill.
+    this._lastInvSeen = {};
+    const trackedKeys = ['coin', 'bale', 'planks', 'tomato', 'potato', 'sauce',
+      'chips', 'egg', 'milk', 'wheat', 'corn', 'grass', 'wood'];
     Inventory.subscribe(() => {
-      const now = Inventory.coin || 0;
-      if (now > this._lastCoinSeen) {
-        this._lifetimeCoinsEarned += (now - this._lastCoinSeen);
+      for (const k of trackedKeys) {
+        const now = Inventory[k] || 0;
+        const prev = this._lastInvSeen[k] || 0;
+        if (now > prev) {
+          const delta = now - prev;
+          if (k === 'coin') this._lifetimeCoinsEarned += delta;
+          else this._lifetimeProduced[k] = (this._lifetimeProduced[k] || 0) + delta;
+        }
+        this._lastInvSeen[k] = now;
       }
-      this._lastCoinSeen = now;
     });
     this.goals = new GoalManager(this);
 
@@ -345,41 +359,12 @@ class Game {
     this._chevronBob = 0;
   }
 
-  // DOM stock pills floating above each market crate. Updated each frame
-  // via worldspace-to-screen projection of the column anchor.
-  _buildCrateStockPills() {
-    const keys = ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'milk'];
-    this._cratePills = {};
-    this._cratePillVec = new THREE.Vector3();
-    const overlay = document.getElementById('world-overlay');
-    for (const k of keys) {
-      const el = document.createElement('div');
-      el.className = 'crate-pill';
-      el.innerHTML = `<span class="pill-icon">${RES_ICONS[k] || ''}</span><span class="pill-n">0</span>`;
-      overlay.appendChild(el);
-      this._cratePills[k] = el;
-    }
-  }
-
-  _updateCrateStockPills() {
-    const market = this.builds.sites.market;
-    if (!market || !market._stockColumns || !this._cratePills) return;
-    for (const [k, col] of Object.entries(market._stockColumns)) {
-      const pill = this._cratePills[k];
-      if (!pill) continue;
-      const n = Inventory[k] || 0;
-      if (n <= 0) { pill.style.opacity = '0'; continue; }
-      pill.querySelector('.pill-n').textContent = n;
-      this._cratePillVec.set(col.x, col.y + 0.9, col.z);
-      const v = this._cratePillVec.project(this.camera);
-      const onscreen = v.z > 0 && v.z < 1;
-      if (!onscreen) { pill.style.opacity = '0'; continue; }
-      const sx = (v.x * 0.5 + 0.5) * window.innerWidth;
-      const sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
-      pill.style.transform = `translate(calc(-50% + ${sx}px), calc(-100% + ${sy}px))`;
-      pill.style.opacity = '1';
-    }
-  }
+  // Stock pills above the market table were removed by request — the visible
+  // crate stacks on the trough already communicate inventory levels, so the
+  // floating numeric pills are visual noise. Stubs kept as no-ops so the call
+  // sites don't need branching.
+  _buildCrateStockPills() { this._cratePills = {}; }
+  _updateCrateStockPills() { /* intentionally empty */ }
 
   _updateGroundChevron(targetPos, visible, dt) {
     if (!this.groundChevron) return;
@@ -396,12 +381,14 @@ class Game {
     c.width = W; c.height = H;
     const ctx = c.getContext('2d');
 
-    // Vertical gradient — deep blue zenith down to pale horizon
+    // Klondike-style soft pastel sky — light teal-blue zenith fading to a
+    // creamy warm horizon. Avoids the deep saturated blue that was making
+    // the green ground look olive in contrast.
     const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0.0, '#2a8fe0');
-    grad.addColorStop(0.45, '#78c6ff');
-    grad.addColorStop(0.8, '#ccecff');
-    grad.addColorStop(1.0, '#e0d9a0');  // warm haze at the horizon
+    grad.addColorStop(0.0, '#7cc8ec');
+    grad.addColorStop(0.45, '#b4ddf2');
+    grad.addColorStop(0.8, '#e3f1f7');
+    grad.addColorStop(1.0, '#f5e9c2');  // warm cream haze at horizon
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
@@ -637,22 +624,6 @@ class Game {
     if (site.key !== 'market' || !site.tableSlots) return 0;
     const anchor = this.player.getCarryAnchor();
     const MAX_FLIGHTS = 16;
-    // Cached geometries/materials (owned by this instance) to avoid allocating
-    // per-spawn. Expanded to cover every sellable good so offloads read for
-    // every market-bound item the player might dump, not just four.
-    if (!this._flightProto) {
-      this._flightProto = {
-        bale:   { geo: new THREE.CylinderGeometry(0.22, 0.22, 0.32, 10), mat: new THREE.MeshLambertMaterial({ color: 0xe2c35a }) },
-        planks: { geo: new THREE.BoxGeometry(0.5, 0.08, 0.18), mat: new THREE.MeshLambertMaterial({ color: 0xb77842 }) },
-        tomato: { geo: new THREE.SphereGeometry(0.18, 10, 8), mat: new THREE.MeshLambertMaterial({ color: 0xe04a3c }) },
-        potato: { geo: new THREE.SphereGeometry(0.16, 8, 6), mat: new THREE.MeshLambertMaterial({ color: 0xc49a5a }) },
-        sauce:  { geo: new THREE.CylinderGeometry(0.1, 0.13, 0.3, 10), mat: new THREE.MeshLambertMaterial({ color: 0xd02e2a }) },
-        chips:  { geo: new THREE.BoxGeometry(0.25, 0.2, 0.2), mat: new THREE.MeshLambertMaterial({ color: 0xe6b548 }) },
-        egg:    { geo: new THREE.SphereGeometry(0.14, 10, 8), mat: new THREE.MeshLambertMaterial({ color: 0xf4e9c8 }) },
-        milk:   { geo: new THREE.CylinderGeometry(0.13, 0.1, 0.3, 10), mat: new THREE.MeshLambertMaterial({ color: 0xffffff }) },
-      };
-      this._flightProto.egg.geo.scale(1, 1.25, 1);
-    }
     let spawned = 0;
     // Build the full queue across all keys so delays are monotonic across
     // the whole offload — "rhythmic deposit" feel instead of parallel arcs.
@@ -665,15 +636,17 @@ class Game {
     const STAGGER_MS = 90;
     for (let q = 0; q < queue.length && spawned < MAX_FLIGHTS; q++, spawned++) {
       const { key, indexInKey } = queue[q];
-      const proto = this._flightProto[key];
-      if (!proto) continue;
+      // Reuse the player's blue-crate factory so deposit flights look
+      // identical to the carry stack they came from — unified prop language.
+      const crate = this.player._makeCrate(key);
+      crate.scale.setScalar(0.9);
       const to = site.getAnyTableSlot() || new THREE.Vector3(site.position.x, 1.0, site.position.z);
       const startOffset = new THREE.Vector3(0, -0.2 + indexInKey * 0.18, 0).add(anchor);
       const endPos = to.clone().add(new THREE.Vector3(
         (Math.random() - 0.5) * 0.6, 0.1, (Math.random() - 0.5) * 0.3
       ));
       this.flight.spawn({
-        geometry: proto.geo, material: proto.mat,
+        mesh: crate,
         startPos: startOffset, endPos,
         durationMs: 440,
         arcH: 1.4,
@@ -917,5 +890,37 @@ class Game {
   if (typeof window !== 'undefined') {
     window.__hh = { game, auth };
   }
+  wireSettingsMenu(auth);
 })();
+
+// Settings menu — gear icon → modal with Restart Game + Log Out + Close.
+// Restart wipes both the local cache + the server save then reloads, so the
+// player drops back into a fresh tutorial run with no carry-over state.
+function wireSettingsMenu(auth) {
+  const btn = document.getElementById('settings-btn');
+  const modal = document.getElementById('settings-modal');
+  const close = document.getElementById('settings-close');
+  const restart = document.getElementById('settings-restart');
+  const logout = document.getElementById('settings-logout');
+  if (!btn || !modal) return;
+  const open = () => modal.classList.add('open');
+  const hide = () => modal.classList.remove('open');
+  btn.addEventListener('click', open);
+  close?.addEventListener('click', hide);
+  modal.addEventListener('click', (e) => { if (e.target === modal) hide(); });
+  restart?.addEventListener('click', async () => {
+    if (!confirm('Restart the game? This wipes your save and starts over.')) return;
+    try {
+      // Clear server save first (best-effort) then nuke ALL local app state
+      await auth.wipeSave?.();
+    } catch {} // eslint-disable-line no-empty
+    try { localStorage.clear(); } catch {} // eslint-disable-line no-empty
+    location.reload();
+  });
+  logout?.addEventListener('click', () => {
+    if (!confirm('Log out? Your save stays on the server.')) return;
+    auth.logout?.();
+    location.reload();
+  });
+}
 void PlayerStats;

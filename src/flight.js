@@ -9,8 +9,11 @@ export class FlightManager {
     this.active = [];
   }
 
-  spawn({ geometry, material, startPos, endPos, endFn, durationMs = 520, arcH = 1.6, spin = true, onLand = null, scale = 1, delayMs = 0 }) {
-    const mesh = new THREE.Mesh(geometry, material);
+  spawn({ geometry, material, mesh: meshIn, startPos, endPos, endFn, durationMs = 520, arcH = 1.6, spin = true, onLand = null, scale = 1, delayMs = 0 }) {
+    // Accept either an explicit pre-built Object3D (group / mesh) via `mesh`,
+    // or geometry+material to construct a plain Mesh. Lets callers fly small
+    // multi-part groups (eg. blue crates with toppers) without hand-rolling.
+    const mesh = meshIn || new THREE.Mesh(geometry, material);
     mesh.position.copy(startPos);
     mesh.scale.setScalar(scale);
     mesh.visible = delayMs <= 0;

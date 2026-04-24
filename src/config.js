@@ -298,7 +298,7 @@ export const CONFIG = {
     chipsFactory: ['potato'],
     eggFarm: ['corn'],
     dairyFarm: ['bale'],
-    market: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'milk'],
+    market: ['bale', 'planks', 'tomato', 'potato', 'sauce', 'chips', 'egg', 'milk', 'wheat', 'corn'],
   },
   // Per-building hire tile config — unlocked at Level 2. Hiring spawns a
   // worker that picks up produced items and delivers them to the market.
@@ -346,14 +346,21 @@ export const CONFIG = {
   // core buildings are Lv3 AND helper training is Lv2+. Paying the cost
   // spawns an autonomous tractor that sweeps the farm harvesting everything.
   tractor: {
-    unlockPos: { x: -8, z: -10 },
+    // Moved away from the harvester unlock pad (which was at +8,-10) — the
+    // standalone tractor's preview + ground decal were sitting under the
+    // harvester crew tile. New spot is on the LEFT flank, deeper north so
+    // the two unlocks don't overlap.
+    unlockPos: { x: -18, z: -16 },
     unlockCost: 800,
     moveSpeed: 7.5,
     capacity: 40,
     harvestRadius: 3.0,
     harvestIntervalSec: 0.35,
     perSweepMax: 6,
-    requiredL3: ['hayBaler', 'sawMill', 'dairyFarm', 'sauceFactory', 'chipsFactory', 'eggFarm'],
+    // Same building gates as the harvester so the preview is reachable once
+    // the player has the harvester combo. The HelperStats Lv2 requirement in
+    // tractor.js _prereqMet() is what differentiates the two unlocks.
+    requiredL3: ['hayBaler', 'sawMill', 'sauceFactory', 'chipsFactory'],
   },
   // Helper training tile — revealed only after every main building is
   // complete AND the map expansion has been activated. Spending coins at
@@ -418,26 +425,35 @@ export const CONFIG = {
     capacity: 10,
   },
   colors: {
-    // Candy-bright, highly saturated palette — meant to pop against the sky
-    // and read clearly on a phone screen outdoors.
-    ground: 0x7ae54a,
-    groundEdge: 0x4fbd2f,
-    meadow: 0x8dff5a,
-    forestFloor: 0x3ea238,
-    grass: 0x6eff3c,
-    grassDark: 0x3fd920,
-    treeTrunk: 0xa66633,
-    treeLeaves: 0x3fd238,
-    treeLeavesDark: 0x2a9a32,
+    // Klondike-style flat-clay palette: emerald grass with broad warm-sand
+    // courtyards under buildings, vermilion accents, sky-blue counter top.
+    // Calibrated to read as "candy" rather than washed-out neon.
+    ground: 0x4ec43a,
+    groundEdge: 0x3aa030,
+    meadow: 0x5dd14a,
+    forestFloor: 0x3ea850,
+    grass: 0x68d850,
+    grassDark: 0x3aac28,
+    treeTrunk: 0x8a5a2b,
+    treeLeaves: 0x4fc548,
+    treeLeavesDark: 0x2f8c34,
     player: 0xffd28a,
-    playerShirt: 0x3ea6ff,
-    playerPants: 0x344272,
+    playerShirt: 0xc84036,
+    playerPants: 0x6a4628,
     backpack: 0xb3702e,
     slash: 0xffffff,
     arrow: 0xffd847,
     buildFrame: 0xf2c14a,
-    buildSiteDirt: 0xa66a3a,
-    path: 0xd7a06a,
-    pathEdge: 0xa07040,
+    buildSiteDirt: 0xb87a44,
+    path: 0xe2c48b,
+    pathEdge: 0xc99e62,
+    // Klondike accent colors — used by buildings, sell counter, money pads
+    barnRed: 0xc84036,
+    barnCream: 0xe8dbb6,
+    sellSky: 0x4fb6e8,
+    cashGreen: 0x46c455,
+    courtyard: 0xe6c790,        // big dirt apron around build row
+    courtyardEdge: 0xc9a468,
+    flowerWhite: 0xffffff,
   },
 };

@@ -41,7 +41,13 @@ export function buildGoals(game) {
       title: 'Collect 5 Hay Bales',
       icon: '🌾',
       target: 5,
-      progress: () => Math.min(5, game._lifetimeCollected?.bale || 0),
+      // Sum player pickups + anything that ever entered Inventory (worker
+      // deliveries) so a hired BuildingWorker can't softlock the goal.
+      progress: () => {
+        const personal = game._lifetimeCollected?.bale || 0;
+        const produced = game._lifetimeProduced?.bale || 0;
+        return Math.min(5, Math.max(personal, produced));
+      },
     },
     {
       id: 'sell-bales',
@@ -150,7 +156,11 @@ export function buildGoals(game) {
       title: 'Collect 30 Planks',
       icon: '🪚',
       target: 30,
-      progress: () => Math.min(30, game._lifetimeCollected?.planks || 0),
+      progress: () => {
+        const personal = game._lifetimeCollected?.planks || 0;
+        const produced = game._lifetimeProduced?.planks || 0;
+        return Math.min(30, Math.max(personal, produced));
+      },
     },
     {
       id: 'baler-l2',
@@ -293,14 +303,22 @@ export function buildGoals(game) {
       title: 'Collect 100 Eggs',
       icon: '🥚',
       target: 100,
-      progress: () => Math.min(100, game._lifetimeCollected?.egg || 0),
+      progress: () => {
+        const personal = game._lifetimeCollected?.egg || 0;
+        const produced = game._lifetimeProduced?.egg || 0;
+        return Math.min(100, Math.max(personal, produced));
+      },
     },
     {
       id: 'collect-100-milk',
       title: 'Collect 100 Milk',
       icon: '🥛',
       target: 100,
-      progress: () => Math.min(100, game._lifetimeCollected?.milk || 0),
+      progress: () => {
+        const personal = game._lifetimeCollected?.milk || 0;
+        const produced = game._lifetimeProduced?.milk || 0;
+        return Math.min(100, Math.max(personal, produced));
+      },
     },
     {
       id: 'earn-25000',
@@ -382,6 +400,25 @@ export class GoalManager {
       this._lastSig = '';
       this._tick();
     }, 900);
+  }
+
+  // Fast-forward through every goal whose progress already meets target,
+  // WITHOUT firing banners/toasts/XP. Used after applySave so a returning
+  // player doesn't watch a parade of "GOAL!" banners catch up to their
+  // actual progress. XP is already restored via UserLevel save state, so
+  // re-granting here would double-credit.
+  silentCatchUp() {
+    let safety = Goals.list.length + 2;
+    while (safety-- > 0) {
+      const g = Goals.current();
+      if (!g) break;
+      const prog = g.progress() || 0;
+      if (prog < g.target) break;
+      g._done = true;
+      Goals.advance();
+    }
+    this._lastSig = '';
+    this._tick();
   }
 
   update() { this._tick(); }

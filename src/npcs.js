@@ -9,19 +9,29 @@ import { getFaceMaterial } from './faces.js';
 // Anime chibi proportions — noticeably bigger head relative to body (~2:1),
 // shorter legs, rounder torso. Reads as "cute cartoon kid" instead of
 // generic human doll.
+// Higher segment counts for smoother silhouette — the previous 4–8 segments
+// gave a slightly faceted look that read as "blocky" from the game camera.
+// Bumping radial segments + cap segments smooths the chibi profile without
+// adding meaningful draw cost (geometries are shared across every NPC).
 const CHIBI_GEOS = {
-  leg: new THREE.CapsuleGeometry(0.14, 0.28, 4, 8),
-  torso: new THREE.CapsuleGeometry(0.28, 0.28, 4, 12),
-  head: new THREE.SphereGeometry(0.34, 20, 14),
-  eye: new THREE.SphereGeometry(0.04, 6, 6),
-  hat: new THREE.CylinderGeometry(0.46, 0.46, 0.06, 20),
-  hatTop: new THREE.SphereGeometry(0.28, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2),
-  arm: new THREE.CapsuleGeometry(0.09, 0.28, 4, 6),
-  hand: new THREE.SphereGeometry(0.11, 10, 8),
+  leg: new THREE.CapsuleGeometry(0.14, 0.28, 8, 16),
+  torso: new THREE.CapsuleGeometry(0.28, 0.28, 8, 18),
+  head: new THREE.SphereGeometry(0.34, 28, 22),
+  eye: new THREE.SphereGeometry(0.04, 8, 6),
+  hat: new THREE.CylinderGeometry(0.46, 0.46, 0.06, 24),
+  hatTop: new THREE.SphereGeometry(0.28, 18, 14, 0, Math.PI * 2, 0, Math.PI / 2),
+  arm: new THREE.CapsuleGeometry(0.09, 0.28, 6, 12),
+  hand: new THREE.SphereGeometry(0.11, 14, 10),
   mouth: new THREE.SphereGeometry(0.05, 8, 6),
-  hair: new THREE.SphereGeometry(0.36, 14, 10),
-  hairBang: new THREE.SphereGeometry(0.16, 10, 8),
-  hairSide: new THREE.SphereGeometry(0.14, 10, 8),
+  hair: new THREE.SphereGeometry(0.36, 20, 16),
+  hairBang: new THREE.SphereGeometry(0.16, 12, 10),
+  hairSide: new THREE.SphereGeometry(0.14, 12, 10),
+  // Neck — small cylinder bridging head + torso so the head doesn't sit
+  // directly on the shoulders like a Lego stud.
+  neck: new THREE.CylinderGeometry(0.13, 0.16, 0.10, 14),
+  // Shoulder cap — small half-sphere where the arm joins the torso for a
+  // smooth rounded transition instead of an obvious capsule end.
+  shoulder: new THREE.SphereGeometry(0.16, 12, 10, 0, Math.PI * 2, 0, Math.PI / 2),
 };
 const CHIBI_SKIN_MAT = new THREE.MeshLambertMaterial({ color: 0xffcf87 });
 const CHIBI_PANTS_MAT = new THREE.MeshLambertMaterial({ color: 0x333a55 });
@@ -167,6 +177,20 @@ function makeChibi(color, hatColor = 0xc69645, hairColor = null, faceVariant = '
   torso.position.y = 0.75;
   g.add(torso);
 
+  // Neck — bridges head + torso so the head doesn't read as a Lego stud
+  const neck = new THREE.Mesh(CHIBI_GEOS.neck, CHIBI_SKIN_MAT);
+  neck.position.y = 1.18;
+  g.add(neck);
+
+  // Rounded shoulder caps — smooth the arm-to-torso transition
+  const shoulderL = new THREE.Mesh(CHIBI_GEOS.shoulder, shirt);
+  shoulderL.position.set(-0.32, 0.95, 0);
+  shoulderL.rotation.z = 0.05;
+  const shoulderR = new THREE.Mesh(CHIBI_GEOS.shoulder, shirt);
+  shoulderR.position.set(0.32, 0.95, 0);
+  shoulderR.rotation.z = -0.05;
+  g.add(shoulderL, shoulderR);
+
   const armL = new THREE.Mesh(CHIBI_GEOS.arm, shirt);
   armL.position.set(-0.32, 0.88, 0);
   const armR = new THREE.Mesh(CHIBI_GEOS.arm, shirt);
@@ -298,13 +322,16 @@ export class Shopkeeper {
     this.scene = scene;
     this.marketSite = marketSite;
     this.group = makeChibi(0xc4a053, 0xffffff, null, 'happy');
-    // Inside the stall, behind the counter, facing customers (+Z).
+    // Stand on the FAR side of the table from the customers — the table is
+    // at marketSite.z - 1.7 with customers approaching from the south, so
+    // the shopkeeper sits just NORTH of the table (between the table and
+    // marketSite center) facing south to serve.
     this.group.position.set(
       marketSite.position.x,
       0,
-      marketSite.position.z - 0.5
+      marketSite.position.z - 2.4
     );
-    this.group.rotation.y = 0;
+    this.group.rotation.y = Math.PI;   // face south (toward customers)
     scene.add(this.group);
     this._t = Math.random() * Math.PI;
     this._waveTimer = 0;
@@ -394,37 +421,55 @@ export class CustomerQueue {
     if (c.bubble) c.bubble.remove();
   }
 
-  _slotPos(slot) {
+  // World position for (lane, row) in the 4×4 grid. Row 0 is the slot
+  // closest to the table (front of line); higher rows are farther south.
+  _slotPos(lane, row) {
     const cfg = CONFIG.customers;
     return {
-      x: cfg.queueStart.x + cfg.queueDir.x * slot * cfg.spacing,
-      z: cfg.queueStart.z + cfg.queueDir.z * slot * cfg.spacing,
+      x: cfg.laneX[lane] + this.marketSite.position.x,
+      z: cfg.frontSlotZ + row * cfg.rowSpacing,
     };
+  }
+
+  _laneOccupants(lane) {
+    return this.customers.filter(
+      (c) => c.lane === lane && (c.state === 'approach' || c.state === 'wait')
+    );
   }
 
   _spawn() {
     const cfg = CONFIG.customers;
-    const activeCount = this.customers.filter((c) => c.state !== 'leave').length;
-    if (activeCount >= cfg.maxQueue) return;
+    const activeCount = this.customers.filter(
+      (c) => c.state === 'approach' || c.state === 'wait'
+    ).length;
+    const maxQueue = cfg.laneX.length * cfg.rowsPerLane;
+    if (activeCount >= maxQueue) return;
     // No unlocked resources → no point spawning customers with nothing to ask for
     const options = this._availableWants();
     if (options.length === 0) return;
 
-    const slot = activeCount;
+    // Pick the lane with the fewest occupants — keeps lines balanced
+    let bestLane = 0, bestCount = Infinity;
+    for (let i = 0; i < cfg.laneX.length; i++) {
+      const n = this._laneOccupants(i).length;
+      if (n < bestCount) { bestCount = n; bestLane = i; }
+    }
+    if (bestCount >= cfg.rowsPerLane) return; // every lane full
+
+    const lane = bestLane;
+    const row = bestCount; // they take the back of the line
+
     const color = cfg.colors[Math.floor(Math.random() * cfg.colors.length)];
-    // Random customer archetype — mix of farmers, women (ponytail + skirt),
-    // kids, and merchants so the queue reads as a whole village.
     const archetypes = ['default', 'female', 'female', 'child', 'default', 'merchant'];
     const variant = archetypes[Math.floor(Math.random() * archetypes.length)];
     const hatColor = variant === 'merchant' ? 0x3a2412 : 0xffffff;
     const group = makeChibi(color, hatColor, null, 'default', variant);
-    const entry = this._slotPos(cfg.maxQueue + 1);
-    group.position.set(entry.x, 0, entry.z);
-    group.rotation.y = Math.atan2(-cfg.queueDir.x, -cfg.queueDir.z);
+    // Spawn south of the courtyard, off the dirt apron, walking IN.
+    const entry = this._slotPos(lane, 0);
+    group.position.set(entry.x, 0, cfg.entryZ);
+    group.rotation.y = Math.PI; // facing north (toward the table)
     this.scene.add(group);
 
-    // Each customer wants a specific resource and quantity they can actually
-    // buy given the current production chain.
     const wantKey = options[Math.floor(Math.random() * options.length)];
     const wantQty = 1 + Math.floor(Math.random() * 3);
 
@@ -433,9 +478,9 @@ export class CustomerQueue {
     bubble.textContent = `${wantQty} ${RES_ICONS[wantKey] || '?'}`;
     document.getElementById('world-overlay').appendChild(bubble);
 
-    const target = this._slotPos(slot);
+    const target = this._slotPos(lane, row);
     this.customers.push({
-      group, bubble, slot,
+      group, bubble, lane, row,
       targetX: target.x, targetZ: target.z,
       walkPhase: 0,
       state: 'approach',
@@ -445,28 +490,40 @@ export class CustomerQueue {
     });
   }
 
+  // Compact each lane: rows are reassigned by current order so a vacated
+  // front slot pulls everyone behind it forward by one.
   _reassignSlots() {
-    // Only customers actively waiting (or still walking in) count toward the
-    // queue order. Served customers in 'receive' or 'leave' vacate their
-    // slot immediately so the next person can become slot 0 and trigger the
-    // market's next sale.
-    const cfg = CONFIG.customers; void cfg;
-    const queueing = this.customers.filter((c) => c.state === 'wait' || c.state === 'approach');
-    queueing.sort((a, b) => a.slot - b.slot);
-    queueing.forEach((c, i) => {
-      c.slot = i;
-      const t = this._slotPos(i);
-      c.targetX = t.x; c.targetZ = t.z;
-      // If they were standing still and their slot moved, step forward.
-      if (c.state === 'wait') c.state = 'approach';
-    });
+    const cfg = CONFIG.customers;
+    for (let lane = 0; lane < cfg.laneX.length; lane++) {
+      const queueing = this.customers.filter(
+        (c) => c.lane === lane && (c.state === 'wait' || c.state === 'approach')
+      );
+      // Sort by current row so existing order is preserved
+      queueing.sort((a, b) => a.row - b.row);
+      queueing.forEach((c, i) => {
+        if (c.row !== i) {
+          c.row = i;
+          const t = this._slotPos(lane, i);
+          c.targetX = t.x; c.targetZ = t.z;
+          if (c.state === 'wait') c.state = 'approach';
+        }
+      });
+    }
   }
 
   update(dt) {
     if (!this.active) return;
     const cfg = CONFIG.customers;
     this.spawnTimer += dt;
-    if (this.spawnTimer >= cfg.spawnIntervalSec) {
+    // Top-up loop: if we're under the minActive threshold, spawn faster so
+    // there are always at least `minActive` customers visible somewhere.
+    const activeCount = this.customers.filter(
+      (c) => c.state === 'approach' || c.state === 'wait'
+    ).length;
+    const interval = activeCount < (cfg.minActive || 0)
+      ? Math.min(cfg.spawnIntervalSec, 0.6)
+      : cfg.spawnIntervalSec;
+    if (this.spawnTimer >= interval) {
       this.spawnTimer = 0;
       this._spawn();
     }
@@ -505,12 +562,9 @@ export class CustomerQueue {
         }
       }
 
-      // Independent serving logic: each waiting customer tries to buy their
-      // own wantKey. If stock is available, their serveTimer ticks up. After
-      // a short delay they pay coins + receive item via flight anim + leave.
-      // Multiple customers can be serving in parallel; out-of-stock ones
-      // just keep waiting.
-      if (c.state === 'wait' && !c.served) {
+      // Only the FRONT customer in each lane can be served — they must
+      // physically be at the table before money changes hands.
+      if (c.state === 'wait' && c.row === 0 && !c.served) {
         const stock = Inventory[c.wantKey] || 0;
         if (stock >= c.wantQty) {
           c.serveTimer += dt;
@@ -518,7 +572,7 @@ export class CustomerQueue {
             this._serveCustomer(c);
           }
         } else {
-          c.serveTimer = 0; // out of stock → reset timer, keep waiting
+          c.serveTimer = 0;
         }
       }
 
@@ -575,17 +629,46 @@ export class CustomerQueue {
         durationMs: 520, arcH: 1.4,
       });
     }
-    // Walk off; next customer takes this slot. Render the purchased items
-    // in their arms so it reads as "bought it, carrying it home".
+    // Customer takes their crate and walks off into the grass. Pick a
+    // diagonal exit point well past the courtyard south edge so they're
+    // visibly walking away with their purchase across the dirt before
+    // disappearing in the grass biome. Lane choice biases east vs west so
+    // the lanes don't clog into a single exit corridor.
+    const cfg = CONFIG.customers;
+    const sideDir = (c.lane < 2) ? -1 : 1;
     c.state = 'leave';
-    c.targetX = c.group.position.x + 6;
-    c.targetZ = c.group.position.z + 5;
+    c.targetX = c.group.position.x + sideDir * (5 + Math.random() * 3);
+    c.targetZ = cfg.exitZ + Math.random() * 2;
     if (c.bubble) c.bubble.style.opacity = '0';
     c.carryItems = { [c.wantKey]: Math.min(c.wantQty, 6) };
     setNpcCarry(c.group, c.carryItems);
-    // Wave to the departing customer
+    // Wave to the departing customer + start the coin-flow animation
     if (this.shopkeeper) this.shopkeeper.wave();
+    this._spawnCoinFlow(c);
     this._reassignSlots();
+  }
+
+  // Coin-flow animation: spawn a few gold coin meshes that fly from the
+  // customer's hands to the market money pile, paying the shopkeeper.
+  _spawnCoinFlow(c) {
+    if (!this.flight || !this.marketSite.coinPile) return;
+    const start = c.group.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+    const pile = this.marketSite.coinPile;
+    const target = pile.origin.clone().add(new THREE.Vector3(0, 0.8, 0));
+    const proto = COIN_FLOW_PROTOS;
+    const flights = Math.min(3 + Math.floor(c.wantQty / 2), 6);
+    for (let i = 0; i < flights; i++) {
+      this.flight.spawn({
+        geometry: proto.geo, material: proto.mat,
+        startPos: start.clone(),
+        endPos: target.clone().add(new THREE.Vector3(
+          (Math.random() - 0.5) * 0.5, 0, (Math.random() - 0.5) * 0.5
+        )),
+        durationMs: 600 + i * 50,
+        arcH: 1.6 + i * 0.1,
+        delayMs: i * 80,
+      });
+    }
   }
 }
 
@@ -604,6 +687,13 @@ const CUSTOMER_FLIGHT_PROTOS = {
   wheat:  { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.34, 8), mat: new THREE.MeshLambertMaterial({ color: 0xe8c54a }) },
 };
 CUSTOMER_FLIGHT_PROTOS.egg.geo.scale(1, 1.25, 1);
+
+// Shared geometry+material for the coin-flow animation that fires when an
+// NPC pays the shopkeeper. One pool, reused for every customer.
+const COIN_FLOW_PROTOS = {
+  geo: new THREE.CylinderGeometry(0.13, 0.13, 0.05, 12),
+  mat: new THREE.MeshLambertMaterial({ color: 0xf7c648 }),
+};
 
 // Helper NPC — hired from the HUD button. A full farmhand: slashes grass,
 // chops trees, occasionally harvests crop plots, and delivers whatever they

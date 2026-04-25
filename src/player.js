@@ -44,8 +44,8 @@ export class Player {
     const pantsMat = new THREE.MeshLambertMaterial({ color: colors.playerPants });
     const bootMat = new THREE.MeshLambertMaterial({ color: 0x2a2520 });
 
-    // Legs — capsules
-    const legGeo = new THREE.CapsuleGeometry(0.14, 0.45, 4, 8);
+    // Legs — smoothed capsules (radial 16, cap 8 — was 8/4 which read faceted)
+    const legGeo = new THREE.CapsuleGeometry(0.14, 0.45, 8, 16);
     this.legL = new THREE.Mesh(legGeo, pantsMat);
     this.legL.position.set(-0.17, 0.4, 0);
     this.legR = new THREE.Mesh(legGeo, pantsMat);
@@ -53,20 +53,37 @@ export class Player {
     body.add(this.legL, this.legR);
 
     // Boots
-    const bootGeo = new THREE.SphereGeometry(0.17, 10, 8);
+    const bootGeo = new THREE.SphereGeometry(0.17, 14, 10);
     bootGeo.scale(1, 0.55, 1.2);
     const bootL = new THREE.Mesh(bootGeo, bootMat);
     bootL.position.set(-0.17, 0.1, 0.03);
     const bootR = new THREE.Mesh(bootGeo, bootMat);
     bootR.position.set(0.17, 0.1, 0.03);
-    this.legL.add(bootL); // moves with leg
+    this.legL.add(bootL);
     this.legR.add(bootR);
 
-    // Torso — rounded capsule
-    const torsoGeo = new THREE.CapsuleGeometry(0.3, 0.35, 4, 10);
+    // Torso — smoothed capsule
+    const torsoGeo = new THREE.CapsuleGeometry(0.3, 0.35, 8, 18);
     this.torso = new THREE.Mesh(torsoGeo, shirtMat);
     this.torso.position.y = 1.05;
     body.add(this.torso);
+
+    // Neck — bridge between head and torso so the head doesn't sit on the
+    // shoulders like a Lego stud
+    const neckGeo = new THREE.CylinderGeometry(0.13, 0.16, 0.10, 14);
+    const neck = new THREE.Mesh(neckGeo, skinMat);
+    neck.position.y = 1.5;
+    body.add(neck);
+
+    // Rounded shoulder caps — soften the arm-to-torso transition
+    const shoulderGeo = new THREE.SphereGeometry(0.18, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+    const shoulderL = new THREE.Mesh(shoulderGeo, shirtMat);
+    shoulderL.position.set(-0.42, 1.32, 0);
+    shoulderL.rotation.z = 0.05;
+    const shoulderR = new THREE.Mesh(shoulderGeo, shirtMat);
+    shoulderR.position.set(0.42, 1.32, 0);
+    shoulderR.rotation.z = -0.05;
+    body.add(shoulderL, shoulderR);
 
     // Belt accent
     const belt = new THREE.Mesh(
@@ -77,7 +94,7 @@ export class Player {
     body.add(belt);
 
     // Head — sphere with painted face texture (eyes/mouth/blush/eyebrows)
-    const headGeo = new THREE.SphereGeometry(0.28, 20, 16);
+    const headGeo = new THREE.SphereGeometry(0.28, 28, 22);
     this.head = new THREE.Mesh(headGeo, getFaceMaterial('default'));
     this.head.position.y = 1.75;
     body.add(this.head);
@@ -100,16 +117,16 @@ export class Player {
     band.position.y = 2.02;
     body.add(brim, cap, band);
 
-    // Arms — capsules
-    const armGeo = new THREE.CapsuleGeometry(0.11, 0.45, 4, 8);
+    // Arms — smoothed capsules
+    const armGeo = new THREE.CapsuleGeometry(0.11, 0.45, 6, 14);
     this.armL = new THREE.Mesh(armGeo, shirtMat);
     this.armL.position.set(-0.42, 1.12, 0);
     this.armR = new THREE.Mesh(armGeo, shirtMat);
     this.armR.position.set(0.42, 1.12, 0);
     body.add(this.armL, this.armR);
 
-    // Hands — spheres at tip
-    const handGeo = new THREE.SphereGeometry(0.11, 10, 8);
+    // Hands — smoothed spheres
+    const handGeo = new THREE.SphereGeometry(0.11, 14, 10);
     const handL = new THREE.Mesh(handGeo, skinMat);
     handL.position.set(0, -0.3, 0);
     this.armL.add(handL);

@@ -894,31 +894,73 @@ class Game {
 })();
 
 // Settings menu — gear icon → modal with Restart Game + Log Out + Close.
-// Restart wipes both the local cache + the server save then reloads, so the
-// player drops back into a fresh tutorial run with no carry-over state.
+// Uses a 2-tap "click again to confirm" pattern instead of the native
+// confirm() dialog, which silently fails in Capacitor WebView on Android.
 function wireSettingsMenu(auth) {
   const btn = document.getElementById('settings-btn');
   const modal = document.getElementById('settings-modal');
   const close = document.getElementById('settings-close');
   const restart = document.getElementById('settings-restart');
   const logout = document.getElementById('settings-logout');
-  if (!btn || !modal) return;
-  const open = () => modal.classList.add('open');
-  const hide = () => modal.classList.remove('open');
+  if (!btn || !modal) {
+    console.warn('[settings] DOM nodes missing — modal or button not found');
+    return;
+  }
+  const open = (e) => { e?.preventDefault?.(); modal.classList.add('open'); };
+  const hide = (e) => { e?.preventDefault?.(); modal.classList.remove('open'); };
+  // Bind click (works on touch + desktop) — pointerdown alternative not
+  // needed since modal is in the DOM, not a 3D-canvas event.
   btn.addEventListener('click', open);
   close?.addEventListener('click', hide);
   modal.addEventListener('click', (e) => { if (e.target === modal) hide(); });
-  restart?.addEventListener('click', async () => {
-    if (!confirm('Restart the game? This wipes your save and starts over.')) return;
+
+  // Two-tap arming: first tap turns the button red + "Tap again to confirm";
+  // second tap within 4 seconds actually performs the destructive action.
+  // Avoids the native confirm() dialog which doesn't render reliably in
+  // the Capacitor WebView.
+  const armable = (el, originalText, action) => {
+    if (!el) return;
+    let armed = false;
+    let armTimer = null;
+    el.addEventListener('click', async (e) => {
+      e.preventDefault();
+      if (!armed) {
+        armed = true;
+        el.dataset.armed = '1';
+        const prev = el.textContent;
+        el.textContent = '⚠️ Tap again to confirm';
+        armTimer = setTimeout(() => {
+          armed = false;
+          el.textContent = prev;
+          delete el.dataset.armed;
+        }, 4000);
+        return;
+      }
+      // Confirmed — clear the timer + run the action
+      clearTimeout(armTimer);
+      armed = false;
+      delete el.dataset.armed;
+      el.textContent = originalText;
+      try { await action(); } catch (err) {
+        console.error('[settings]', el.id, 'action failed:', err?.message);
+      }
+    });
+  };
+
+  armable(restart, '🔄 Restart Game', async () => {
+    // Best-effort server wipe with a 1.5s timeout so a slow network never
+    // blocks the local reset. Then nuke localStorage and reload.
     try {
-      // Clear server save first (best-effort) then nuke ALL local app state
-      await auth.wipeSave?.();
+      await Promise.race([
+        auth.wipeSave?.() || Promise.resolve(),
+        new Promise((r) => setTimeout(r, 1500)),
+      ]);
     } catch {} // eslint-disable-line no-empty
     try { localStorage.clear(); } catch {} // eslint-disable-line no-empty
     location.reload();
   });
-  logout?.addEventListener('click', () => {
-    if (!confirm('Log out? Your save stays on the server.')) return;
+
+  armable(logout, '👋 Log Out', () => {
     auth.logout?.();
     location.reload();
   });

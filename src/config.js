@@ -328,6 +328,7 @@ export const CONFIG = {
   trader: {
     spawnDelaySec: 90,     // seconds after game start for the first arrival
     intervalSec: 120,      // wait between orders
+    parkSec: 60,           // how long the trader waits at the park spot
     parkPos: { x: 6, z: 16 },    // on the customer road, east of queue
     entryPos: { x: 28, z: 16 },  // off-screen east
     exitPos:  { x: 28, z: 16 },
@@ -398,16 +399,25 @@ export const CONFIG = {
     { key: 'speed',       x: -5, z: 11 },
     { key: 'slashRadius', x:  5, z: 11 },
   ],
-  // Customer queue — on the SOUTH side of the store (behind, from the
-  // player's viewpoint). Market sits at (0, 22), queue at z=25 so customers
-  // queue between store and the camera. Player deposits from the north side
-  // via the SELL tile.
+  // Customer queue — 4 parallel lanes × 4 rows = 16 max, fronting the
+  // sell table from the south side. Each lane lines up under one of the
+  // sell-table sections so each customer can physically reach the trough
+  // before being served. Lane spacing matches the table column count.
   customers: {
-    queueStart: { x: -1.5, z: 16 },
-    queueDir:   { x: 1, z: 0 },
-    spacing: 1.0,
-    maxQueue: 4,
-    spawnIntervalSec: 2.5,
+    // Each lane's column X (table is 3.2 wide centered at marketSite.x)
+    laneX: [-1.4, -0.45, 0.45, 1.4],
+    // Front slot Z (closest to table) is just south of the table edge.
+    // Table is at marketSite.z - 1.7, so frontSlotZ sits ~1.0 south of that
+    // — close enough that the customer is leaning on the trough.
+    frontSlotZ: 14.0,           // marketSite.z - 1.7 + ~1.4 padding
+    rowSpacing: 1.0,            // distance between rows in a lane
+    rowsPerLane: 4,             // 4 customers per lane × 4 lanes = 16 max
+    // Entry/exit positions — far south on the dirt edge so customers walk
+    // visibly across the courtyard to/from the grass.
+    entryZ: 22,
+    exitZ: 24,                  // walk-away terminus (in grass beyond courtyard)
+    minActive: 5,               // top up to this minimum at all times
+    spawnIntervalSec: 1.6,
     leaveAfterSec: 1.2,
     colors: [0x3a7dd6, 0xd4493c, 0x8a5ed1, 0xd4a53a, 0x3e9d6e, 0xd07878, 0x58b0c9],
   },

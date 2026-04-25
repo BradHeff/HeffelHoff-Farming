@@ -178,6 +178,10 @@ export class TraderEvent {
       if (this._driveTo(this.cfg.parkPos.x, this.cfg.parkPos.z, 5.5, dt)) {
         this.state = 'parked';
         this.decal.mesh.visible = true;
+        // Restart the wait timer with the parkSec budget — was previously
+        // continuing the spawn-countdown which had already expired, so the
+        // trader timed out the same frame it parked and drove away.
+        this.timer = this.cfg.parkSec;
       }
     } else if (this.state === 'parked') {
       this.decal.update(dt);

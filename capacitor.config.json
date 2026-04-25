@@ -2,10 +2,19 @@
   "appId": "com.hefflhoff.farm",
   "appName": "HefflHoff Farm",
   "webDir": "dist",
+  "bundledWebRuntime": false,
   "android": {
     "allowMixedContent": true
   },
+  "ios": {
+    "contentInset": "automatic",
+    "scheme": "HefflHoffFarm",
+    "limitsNavigationsToAppBoundDomains": false,
+    "preferredContentMode": "mobile"
+  },
   "server": {
-    "androidScheme": "https"
+    "androidScheme": "https",
+    "iosScheme": "capacitor",
+    "cleartext": false
   }
 }

@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell($sdk = \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\"; & \"$sdk\\\\platform-tools\\\\adb.exe\" devices; Write-Output \"---\"; Get-ChildItem \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\\\\bin\\\\java.exe\" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName; Get-ChildItem \"C:\\\\Program Files\\\\Eclipse Adoptium\" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name; Write-Output \"---JDKs---\"; Get-ChildItem \"C:\\\\Program Files\\\\Java\" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)"
-    ]
-  }
-}
